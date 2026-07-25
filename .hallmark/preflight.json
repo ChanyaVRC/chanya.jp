@@ -1,0 +1,11 @@
+{
+  "version": "1.1.0",
+  "scanned": "2026-07-25",
+  "framework": "Hono JSX + TypeScript + Cloudflare Vite plugin",
+  "fontStack": "Space Grotesk Variable / Inter Variable / JetBrains Mono Variable",
+  "palette": "Cobalt: cool paper, graphite ink, electric cobalt signal",
+  "motion": "cut by default; one-shot reveal and state feedback only",
+  "spacing": "4pt semantic scale",
+  "preserved": ["Chanya.jp wordmark", "profile copy", "VRChat photography"],
+  "replaced": ["legacy framework", "legacy palette", "legacy font stack"]
+}
