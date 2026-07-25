@@ -27,19 +27,6 @@ const ProfilePicture: FC<{ readonly priority?: boolean }> = ({ priority }) => (
   </picture>
 );
 
-const ProfileCode: FC = () => (
-  <figure class={styles.codeFigure} data-profile-code>
-    <figcaption>profile.ts</figcaption>
-    <pre tabindex={0} aria-label="profile.ts のTypeScriptコード">
-      <code><span data-syntax="keyword">type</span>{" "}<span data-syntax="type">Chanya</span>{` = {
-  `}<span data-syntax="property">name</span>{`: `}<span data-syntax="string">"九島茶にゃ"</span>{`;
-  `}<span data-syntax="property">role</span>{`: `}<span data-syntax="string">"多分技術者"</span>{`;
-  `}<span data-syntax="property">location</span>{`: `}<span data-syntax="string">"Japan"</span>{`;
-};`}</code>
-    </pre>
-  </figure>
-);
-
 const ProjectRecord: FC<{
   readonly project: Project;
 }> = ({ project }) => (
@@ -100,9 +87,13 @@ const GalleryPicture: FC<{
 export const HomePage: FC = () => (
   <>
     <section class={styles.heroSplit} aria-labelledby="home-title">
-      <div class={styles.heroCopy} data-reveal>
+      <div class={styles.heroCopy} data-home-copy data-reveal>
         <p class={styles.meta}>Chanya Kushima · Japan</p>
-        <h1 id="home-title">{site.tagline}</h1>
+        <h1 id="home-title" aria-label={site.tagline}>
+          {site.taglineLines.map((line) => (
+            <span>{line}</span>
+          ))}
+        </h1>
         <p class={styles.heroLede}>
           九島茶にゃの開発、VRChat、写真。作ったものと、見つけた景色を同じ場所に置いています。
         </p>
@@ -116,16 +107,17 @@ export const HomePage: FC = () => (
         </div>
       </div>
 
-      <div class={styles.heroProof} data-reveal>
-        <ProfileCode />
-        <figure class={styles.profileFigure}>
-          <ProfilePicture priority />
-          <figcaption>
-            <strong>九島茶にゃ</strong>
-            <span>Twitterの姿</span>
-          </figcaption>
-        </figure>
-      </div>
+      <figure
+        class={styles.profileFigure}
+        data-profile-photo
+        data-reveal
+      >
+        <ProfilePicture priority />
+        <figcaption>
+          <strong>九島茶にゃ</strong>
+          <span>プロフィールアイコン</span>
+        </figcaption>
+      </figure>
     </section>
 
     <section class={styles.darkBand} aria-labelledby="current-work-title">

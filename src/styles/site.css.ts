@@ -1,5 +1,5 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
+/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · home variation: identity copy / uncropped icon · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
 import { createGlobalTheme, globalStyle, style } from "@vanilla-extract/css";
 import { designTokens, valuesOf } from "./design-tokens";
 
@@ -570,26 +570,32 @@ export const meta = style({
 export const heroSplit = style({
   ...sectionPad,
   display: "grid",
+  gridTemplateAreas: '"copy" "profile"',
+  gridTemplateColumns: "minmax(0, 1fr)",
   width: "100%",
   maxWidth: vars.size.content,
   marginInline: "auto",
   paddingBlockStart: vars.space[12],
   paddingBlockEnd: vars.space[16],
-  gap: vars.space[8],
+  rowGap: vars.space[8],
   alignItems: "start",
   "@media": {
-    "screen and (min-width: 48rem)": {
-      gridTemplateColumns: "minmax(0, 1.05fr) minmax(20rem, 0.95fr)",
+    "screen and (min-width: 60rem)": {
+      gridTemplateAreas: '"copy profile"',
+      gridTemplateColumns: "minmax(0, 7fr) minmax(20rem, 5fr)",
       minHeight: "calc(100svh - 4.5rem)",
+      paddingInline: vars.space[8],
       paddingBlockStart: vars.space[16],
       paddingBlockEnd: vars.space[24],
-      gap: vars.space[12],
+      columnGap: vars.space[12],
+      alignContent: "center",
       alignItems: "center",
     },
   },
 });
 
 export const heroCopy = style({
+  gridArea: "copy",
   display: "grid",
   alignContent: "center",
   gap: vars.space[6],
@@ -597,7 +603,11 @@ export const heroCopy = style({
 
 globalStyle(`${heroCopy} h1`, {
   maxWidth: "10ch",
-  fontSize: "clamp(2.75rem, 10vw, 7rem)",
+  fontSize: "clamp(2.75rem, 7vw, 5.5rem)",
+});
+
+globalStyle(`${heroCopy} h1 span`, {
+  display: "block",
 });
 
 export const heroLede = style({
@@ -666,21 +676,16 @@ export const secondaryButton = style({
   },
 });
 
-export const heroProof = style({
-  position: "relative",
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr)",
-  gap: vars.space[4],
+export const profileFigure = style({
+  gridArea: "profile",
   minWidth: 0,
   "@media": {
-    "screen and (min-width: 48rem)": {
-      display: "block",
+    "screen and (min-width: 60rem)": {
+      width: "min(100%, 25rem)",
+      justifySelf: "end",
+      alignSelf: "center",
     },
   },
-});
-
-export const profileFigure = style({
-  minWidth: 0,
 });
 
 globalStyle(`${profileFigure} picture`, {
@@ -692,7 +697,8 @@ globalStyle(`${profileFigure} picture`, {
 globalStyle(`${profileFigure} img`, {
   width: "100%",
   height: "100%",
-  objectFit: "cover",
+  objectFit: "contain",
+  objectPosition: "center",
 });
 
 globalStyle(`${profileFigure} figcaption`, {
@@ -705,58 +711,6 @@ globalStyle(`${profileFigure} figcaption`, {
 });
 
 globalStyle(`${profileFigure} figcaption span`, {
-  color: vars.color.graphiteSoft,
-});
-
-export const codeFigure = style({
-  position: "relative",
-  zIndex: 1,
-  width: "100%",
-  minWidth: 0,
-  padding: vars.space[4],
-  border: `${vars.size.hairline} solid ${vars.color.graphite}`,
-  background: vars.color.paperRaised,
-  boxShadow: vars.shadow.raised,
-  "@media": {
-    "screen and (min-width: 48rem)": {
-      position: "absolute",
-      insetInlineStart: 0,
-      insetBlockEnd: vars.space[8],
-      width: "min(22rem, 78%)",
-    },
-  },
-});
-
-globalStyle(`${codeFigure} figcaption`, {
-  marginBlockEnd: vars.space[3],
-  color: vars.color.graphiteSoft,
-  fontFamily: vars.font.mono,
-  fontSize: "0.66rem",
-});
-
-globalStyle(`${codeFigure} pre`, {
-  overflowX: "auto",
-  fontSize: "clamp(0.7rem, 1.2vw, 0.82rem)",
-  lineHeight: 1.65,
-  tabSize: 2,
-});
-
-globalStyle(`${codeFigure} [data-syntax="keyword"]`, {
-  color: vars.color.cobaltDark,
-  fontWeight: vars.weight.bold,
-});
-
-globalStyle(`${codeFigure} [data-syntax="type"]`, {
-  color: vars.color.graphite,
-  fontWeight: vars.weight.semibold,
-});
-
-globalStyle(`${codeFigure} [data-syntax="property"]`, {
-  color: vars.color.graphiteSoft,
-  fontWeight: vars.weight.medium,
-});
-
-globalStyle(`${codeFigure} [data-syntax="string"]`, {
   color: vars.color.cobaltDark,
 });
 

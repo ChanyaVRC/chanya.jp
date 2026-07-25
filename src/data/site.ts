@@ -6,11 +6,14 @@ import type {
   Project,
 } from "../types";
 
+const taglineLines = ["ねこ。多分", "技術者。"] as const;
+
 export const site = {
   name: "Chanya.jp",
   ownerJa: "九島茶にゃ",
   ownerEn: "Chanya Kushima",
-  tagline: "ねこ。多分技術者。",
+  tagline: taglineLines.join(""),
+  taglineLines,
   description: "九島茶にゃの開発、VRChat、写真をまとめた個人サイト。",
   origin: "https://chanya.jp",
 } as const;

@@ -107,7 +107,7 @@ test("only the home page uses an oversized page heading", async ({ page }) => {
   expect(notFoundSize, "404 heading is oversized").toBeLessThanOrEqual(52);
 });
 
-test("profile code is complete, highlighted and visible in the first viewport", async ({
+test("home hero pairs the identity copy with the full profile icon", async ({
   page,
 }) => {
   const viewports = [
@@ -115,63 +115,146 @@ test("profile code is complete, highlighted and visible in the first viewport", 
     { width: 375, height: 812 },
     { width: 414, height: 896 },
     { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
     { width: 1280, height: 800 },
     { width: 1440, height: 900 },
   ] as const;
-  const expectedCode = `type Chanya = {
-  name: "九島茶にゃ";
-  role: "多分技術者";
-  location: "Japan";
-};`;
-
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
 
-    const codeFigure = page.locator("[data-profile-code]");
-    await expect(codeFigure).toBeVisible();
-    const result = await codeFigure.evaluate((figure) => {
-      const pre = figure.querySelector("pre");
-      if (!(pre instanceof HTMLElement)) {
-        throw new Error("profile code pre is missing");
+    await expect(page.locator("[data-profile-code]")).toHaveCount(0);
+    await expect(page.getByText("profile.ts", { exact: true })).toHaveCount(0);
+    await expect(
+      page.locator("[data-profile-photo] figcaption"),
+    ).toContainText("九島茶にゃプロフィールアイコン");
+
+    const result = await page.evaluate(() => {
+      const copy = document.querySelector<HTMLElement>("[data-home-copy]");
+      const photo = document.querySelector<HTMLElement>("[data-profile-photo]");
+      if (!(copy && photo)) {
+        throw new Error("home hero geometry hooks are missing");
       }
 
-      const bounds = figure.getBoundingClientRect();
-      const syntaxKinds = [
-        ...figure.querySelectorAll<HTMLElement>("[data-syntax]"),
-      ].map((token) => token.dataset.syntax);
+      const picture = photo.querySelector("picture");
+      const image = photo.querySelector("img");
+      if (!(picture instanceof HTMLElement && image instanceof HTMLImageElement)) {
+        throw new Error("profile picture is missing");
+      }
 
+      const copyBounds = copy.getBoundingClientRect();
+      const photoBounds = photo.getBoundingClientRect();
+      const pictureBounds = picture.getBoundingClientRect();
+      const imageBounds = image.getBoundingClientRect();
+      const imageStyle = getComputedStyle(image);
+      const intersectionArea = (first: DOMRect, second: DOMRect) => {
+        const width = Math.max(
+          0,
+          Math.min(first.right, second.right) -
+            Math.max(first.left, second.left),
+        );
+        const height = Math.max(
+          0,
+          Math.min(first.bottom, second.bottom) -
+            Math.max(first.top, second.top),
+        );
+        return width * height;
+      };
       return {
-        top: bounds.top,
-        bottom: bounds.bottom,
+        copy: {
+          top: copyBounds.top,
+          right: copyBounds.right,
+          bottom: copyBounds.bottom,
+          left: copyBounds.left,
+        },
+        photo: {
+          top: photoBounds.top,
+          right: photoBounds.right,
+          bottom: photoBounds.bottom,
+          left: photoBounds.left,
+        },
+        picture: {
+          width: pictureBounds.width,
+          height: pictureBounds.height,
+          objectFit: imageStyle.objectFit,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          loaded: image.complete && image.naturalWidth > 0,
+          transform: imageStyle.transform,
+          clipPath: imageStyle.clipPath,
+          imageTop: imageBounds.top,
+          imageRight: imageBounds.right,
+          imageBottom: imageBounds.bottom,
+          imageLeft: imageBounds.left,
+          top: pictureBounds.top,
+          right: pictureBounds.right,
+          bottom: pictureBounds.bottom,
+          left: pictureBounds.left,
+        },
+        copyPhotoIntersection: intersectionArea(copyBounds, photoBounds),
         viewportHeight: window.innerHeight,
-        clientWidth: pre.clientWidth,
-        scrollWidth: pre.scrollWidth,
-        text: pre.textContent?.replace(/\r\n/g, "\n").trim() ?? "",
-        syntaxKinds: [...new Set(syntaxKinds)].sort(),
+        viewportWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
       };
     });
 
+    expect(result.copyPhotoIntersection).toBeLessThanOrEqual(1);
     expect(
-      result.top,
-      `profile code starts above the viewport at ${String(viewport.width)}px`,
-    ).toBeGreaterThanOrEqual(-1);
+      result.documentWidth,
+      `home page scrolls horizontally at ${String(viewport.width)}px`,
+    ).toBeLessThanOrEqual(result.viewportWidth + 1);
     expect(
-      result.bottom,
-      `profile code falls below the first viewport at ${String(viewport.width)}px`,
-    ).toBeLessThanOrEqual(result.viewportHeight + 1);
-    expect(
-      result.scrollWidth,
-      `profile code scrolls horizontally at ${String(viewport.width)}px`,
-    ).toBeLessThanOrEqual(result.clientWidth + 1);
-    expect(result.text).toBe(expectedCode);
-    expect(result.text.match(/多分技術者/g)).toHaveLength(1);
-    expect(result.syntaxKinds).toEqual([
-      "keyword",
-      "property",
-      "string",
-      "type",
-    ]);
+      Math.abs(result.picture.width - result.picture.height),
+      `profile icon is cropped to a non-square frame at ${String(viewport.width)}px`,
+    ).toBeLessThanOrEqual(1);
+    expect(result.picture.loaded).toBe(true);
+    expect(result.picture.objectFit).toBe("contain");
+    expect(result.picture.naturalWidth).toBe(result.picture.naturalHeight);
+    expect(result.picture.transform).toBe("none");
+    expect(result.picture.clipPath).toBe("none");
+    expect(Math.abs(result.picture.imageTop - result.picture.top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageRight - result.picture.right)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageBottom - result.picture.bottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageLeft - result.picture.left)).toBeLessThanOrEqual(1);
+
+    for (const [name, bounds] of [
+      ["copy", result.copy],
+      ["profile", result.photo],
+    ] as const) {
+      expect(
+        bounds.left,
+        `${name} starts outside the viewport at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(-1);
+      expect(
+        bounds.right,
+        `${name} ends outside the viewport at ${String(viewport.width)}px`,
+      ).toBeLessThanOrEqual(result.viewportWidth + 1);
+    }
+
+    if (viewport.width <= 768) {
+      expect(
+        result.photo.top - result.copy.bottom,
+        `identity copy and icon are cramped at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(24);
+      expect(Math.abs(result.copy.left - result.photo.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(result.copy.right - result.photo.right)).toBeLessThanOrEqual(1);
+    } else {
+      expect(
+        result.photo.left - result.copy.right,
+        `identity copy and icon columns are cramped at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(12);
+      expect(
+        result.photo.bottom,
+        `profile icon falls below the first viewport at ${String(viewport.width)}px`,
+      ).toBeLessThanOrEqual(result.viewportHeight + 1);
+      const leftCenter = (result.copy.top + result.copy.bottom) / 2;
+      const profileCenter = (result.photo.top + result.photo.bottom) / 2;
+      expect(
+        Math.abs(leftCenter - profileCenter),
+        `hero columns are vertically unbalanced at ${String(viewport.width)}px`,
+      ).toBeLessThanOrEqual(32);
+    }
   }
 });
 
