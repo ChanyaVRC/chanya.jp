@@ -458,33 +458,6 @@ function initialiseReveals(): void {
   });
 }
 
-function initialiseTypeLine(): void {
-  const element = document.querySelector("[data-type-line]");
-  if (!(element instanceof HTMLElement) || reducedMotion.matches) {
-    return;
-  }
-
-  const text = element.textContent ?? "";
-  if (text.length === 0) {
-    return;
-  }
-
-  const characters = Array.from(text);
-  let index = 0;
-  element.textContent = "";
-
-  const typeNextCharacter = (): void => {
-    element.textContent = characters.slice(0, index + 1).join("");
-    index += 1;
-
-    if (index < characters.length) {
-      window.setTimeout(typeNextCharacter, 72);
-    }
-  };
-
-  window.setTimeout(typeNextCharacter, 240);
-}
-
 function initialise(): void {
   const closeMobileNavigation = initialiseMobileNavigation();
   initialiseHeader();
@@ -492,7 +465,6 @@ function initialise(): void {
   initialiseGallery();
   initialiseRuntimeHtml();
   initialiseReveals();
-  initialiseTypeLine();
 }
 
 if (document.readyState === "loading") {

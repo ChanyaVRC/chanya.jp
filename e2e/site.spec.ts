@@ -107,6 +107,74 @@ test("only the home page uses an oversized page heading", async ({ page }) => {
   expect(notFoundSize, "404 heading is oversized").toBeLessThanOrEqual(52);
 });
 
+test("profile code is complete, highlighted and visible in the first viewport", async ({
+  page,
+}) => {
+  const viewports = [
+    { width: 320, height: 720 },
+    { width: 375, height: 812 },
+    { width: 414, height: 896 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 },
+    { width: 1440, height: 900 },
+  ] as const;
+  const expectedCode = `type Chanya = {
+  name: "九島茶にゃ";
+  role: "多分技術者";
+  location: "Japan";
+};`;
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+
+    const codeFigure = page.locator("[data-profile-code]");
+    await expect(codeFigure).toBeVisible();
+    const result = await codeFigure.evaluate((figure) => {
+      const pre = figure.querySelector("pre");
+      if (!(pre instanceof HTMLElement)) {
+        throw new Error("profile code pre is missing");
+      }
+
+      const bounds = figure.getBoundingClientRect();
+      const syntaxKinds = [
+        ...figure.querySelectorAll<HTMLElement>("[data-syntax]"),
+      ].map((token) => token.dataset.syntax);
+
+      return {
+        top: bounds.top,
+        bottom: bounds.bottom,
+        viewportHeight: window.innerHeight,
+        clientWidth: pre.clientWidth,
+        scrollWidth: pre.scrollWidth,
+        text: pre.textContent?.replace(/\r\n/g, "\n").trim() ?? "",
+        syntaxKinds: [...new Set(syntaxKinds)].sort(),
+      };
+    });
+
+    expect(
+      result.top,
+      `profile code starts above the viewport at ${String(viewport.width)}px`,
+    ).toBeGreaterThanOrEqual(-1);
+    expect(
+      result.bottom,
+      `profile code falls below the first viewport at ${String(viewport.width)}px`,
+    ).toBeLessThanOrEqual(result.viewportHeight + 1);
+    expect(
+      result.scrollWidth,
+      `profile code scrolls horizontally at ${String(viewport.width)}px`,
+    ).toBeLessThanOrEqual(result.clientWidth + 1);
+    expect(result.text).toBe(expectedCode);
+    expect(result.text.match(/多分技術者/g)).toHaveLength(1);
+    expect(result.syntaxKinds).toEqual([
+      "keyword",
+      "property",
+      "string",
+      "type",
+    ]);
+  }
+});
+
 test("gallery exposes 42 works in a closable dialog", async ({ page }) => {
   await page.goto("/gallery/");
 

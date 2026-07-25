@@ -27,6 +27,19 @@ const ProfilePicture: FC<{ readonly priority?: boolean }> = ({ priority }) => (
   </picture>
 );
 
+const ProfileCode: FC = () => (
+  <figure class={styles.codeFigure} data-profile-code>
+    <figcaption>profile.ts</figcaption>
+    <pre tabindex={0} aria-label="profile.ts のTypeScriptコード">
+      <code><span data-syntax="keyword">type</span>{" "}<span data-syntax="type">Chanya</span>{` = {
+  `}<span data-syntax="property">name</span>{`: `}<span data-syntax="string">"九島茶にゃ"</span>{`;
+  `}<span data-syntax="property">role</span>{`: `}<span data-syntax="string">"多分技術者"</span>{`;
+  `}<span data-syntax="property">location</span>{`: `}<span data-syntax="string">"Japan"</span>{`;
+};`}</code>
+    </pre>
+  </figure>
+);
+
 const ProjectRecord: FC<{
   readonly project: Project;
 }> = ({ project }) => (
@@ -104,22 +117,13 @@ export const HomePage: FC = () => (
       </div>
 
       <div class={styles.heroProof} data-reveal>
+        <ProfileCode />
         <figure class={styles.profileFigure}>
           <ProfilePicture priority />
           <figcaption>
             <strong>九島茶にゃ</strong>
             <span>Twitterの姿</span>
           </figcaption>
-        </figure>
-        <figure class={styles.codeFigure}>
-          <figcaption>profile.ts</figcaption>
-          <pre tabindex={0} aria-label="profile.ts のコード">
-            <code>{`type Chanya = {
-  name: "九島茶にゃ";
-  role: "`}<span class={styles.srOnly}>多分技術者</span><span aria-hidden="true" data-type-line>多分技術者</span>{`";
-  location: "Japan";
-};`}</code>
-          </pre>
         </figure>
       </div>
     </section>
