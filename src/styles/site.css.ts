@@ -1,5 +1,5 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Split Studio · theme: Cobalt · enrichment: existing profile photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
-/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V5 */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
 import { createGlobalTheme, globalStyle, style } from "@vanilla-extract/css";
 import { designTokens, valuesOf } from "./design-tokens";
 
@@ -78,7 +78,7 @@ globalStyle("h1, h2, h3", {
 });
 
 globalStyle("h1", {
-  fontSize: "clamp(2.75rem, 10vw, 7rem)",
+  fontSize: "clamp(2rem, 5vw, 3.25rem)",
 });
 
 globalStyle("h2", {
@@ -595,6 +595,7 @@ export const heroCopy = style({
 
 globalStyle(`${heroCopy} h1`, {
   maxWidth: "10ch",
+  fontSize: "clamp(2.75rem, 10vw, 7rem)",
 });
 
 export const heroLede = style({

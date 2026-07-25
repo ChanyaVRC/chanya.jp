@@ -80,6 +80,33 @@ test("Cmd/Ctrl-K opens, filters and closes the command palette", async ({
   await expect(dialog).not.toBeVisible();
 });
 
+test("only the home page uses an oversized page heading", async ({ page }) => {
+  await page.goto("/");
+  const homeSize = await page
+    .getByRole("heading", { level: 1 })
+    .evaluate((heading) => Number.parseFloat(getComputedStyle(heading).fontSize));
+
+  expect(homeSize).toBeGreaterThan(80);
+
+  for (const { path } of publicPages.slice(1)) {
+    await page.goto(path);
+    const pageSize = await page
+      .getByRole("heading", { level: 1 })
+      .evaluate((heading) =>
+        Number.parseFloat(getComputedStyle(heading).fontSize),
+      );
+
+    expect(pageSize, `${path} heading is oversized`).toBeLessThanOrEqual(52);
+  }
+
+  await page.goto("/not-a-real-route/");
+  const notFoundSize = await page
+    .getByRole("heading", { level: 1 })
+    .evaluate((heading) => Number.parseFloat(getComputedStyle(heading).fontSize));
+
+  expect(notFoundSize, "404 heading is oversized").toBeLessThanOrEqual(52);
+});
+
 test("gallery exposes 42 works in a closable dialog", async ({ page }) => {
   await page.goto("/gallery/");
 
