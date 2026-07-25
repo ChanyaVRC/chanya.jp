@@ -2,6 +2,7 @@ import {
   galleryManifestSchema,
   type GalleryManifest,
   type GalleryManifestItem,
+  type GallerySection,
 } from "./gallery/manifest";
 import * as styles from "./styles/site.css";
 
@@ -64,7 +65,7 @@ const isHtmlElement = (element: Element): element is HTMLElement =>
   element instanceof HTMLElement;
 const isButton = (element: Element): element is HTMLButtonElement =>
   element instanceof HTMLButtonElement;
-const grid = requiredElement(root, "[data-gallery-grid]", isHtmlElement);
+const canvas = requiredElement(root, "[data-gallery-canvas]", isHtmlElement);
 const inspector = requiredElement(
   root,
   "[data-gallery-inspector]",
@@ -77,6 +78,7 @@ const previewButton = requiredElement(root, "[data-gallery-preview]", isButton);
 const saveButton = requiredElement(root, "[data-gallery-save]", isButton);
 const publishButton = requiredElement(root, "[data-gallery-publish]", isButton);
 const importButton = requiredElement(root, "[data-gallery-import]", isButton);
+const addSectionButton = requiredElement(root, "[data-section-add]", isButton);
 const folderInput = requiredElement(
   root,
   "[data-gallery-folder-input]",
@@ -85,25 +87,59 @@ const folderInput = requiredElement(
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const localPreviews = new Map<string, string>();
-const undoStack: GalleryManifestItem[][] = [];
+
+interface GalleryContent {
+  readonly sections: GallerySection[];
+  readonly items: GalleryManifestItem[];
+}
+
+type EditorSelection =
+  | { readonly kind: "item"; readonly id: string }
+  | { readonly kind: "section"; readonly id: string };
+
+type DragState =
+  | {
+      readonly kind: "item";
+      readonly id: string;
+      readonly snapshot: GalleryContent;
+    }
+  | {
+      readonly kind: "section";
+      readonly id: string;
+      readonly snapshot: GalleryContent;
+    };
+
+const undoStack: GalleryContent[] = [];
 let manifest = structuredClone(bootstrap.manifest);
 let confirmedManifest = structuredClone(bootstrap.manifest);
-let selectedId: string | null = null;
+let selection: EditorSelection | null = null;
 let previewOnly = false;
 let importInProgress = false;
 let saveTimer: number | null = null;
-let saveInFlight: Promise<boolean> | null = null;
+let saveQueue: Promise<boolean> | null = null;
 let saveAgain = false;
 let toastTimer: number | null = null;
-let inspectorEditStart: GalleryManifestItem[] | null = null;
-let dragStartItems: GalleryManifestItem[] | null = null;
+let inspectorEditStart: GalleryContent | null = null;
+let dragState: DragState | null = null;
 
-function itemFingerprint(items: readonly GalleryManifestItem[]): string {
-  return JSON.stringify(items);
+function contentFingerprint(content: GalleryContent): string {
+  return JSON.stringify({
+    sections: content.sections,
+    items: content.items,
+  });
 }
 
 function cloneItems(items = manifest.items): GalleryManifestItem[] {
   return structuredClone(items);
+}
+
+function cloneContent(
+  content: Pick<GalleryManifest, "sections" | "items"> = manifest,
+): GalleryContent {
+  return {
+    sections: structuredClone(content.sections),
+    items: structuredClone(content.items),
+  };
 }
 
 function setStatus(
@@ -125,15 +161,15 @@ function showToast(message: string): void {
   }, 3200);
 }
 
-function pushUndo(items: GalleryManifestItem[] = cloneItems()): void {
+function pushUndo(content: GalleryContent = cloneContent()): void {
   if (
     undoStack.at(-1) &&
-    itemFingerprint(undoStack.at(-1)!) === itemFingerprint(items)
+    contentFingerprint(undoStack.at(-1)!) === contentFingerprint(content)
   ) {
     return;
   }
 
-  undoStack.push(items);
+  undoStack.push(content);
   if (undoStack.length > 30) {
     undoStack.shift();
   }
@@ -265,7 +301,9 @@ function updateFigure(
   } else {
     delete button.dataset.galleryOpen;
     button.dataset.gallerySelect = "";
-    button.ariaPressed = String(selectedId === item.id);
+    button.ariaPressed = String(
+      selection?.kind === "item" && selection.id === item.id,
+    );
     button.ariaLabel = `${item.title}を編集`;
   }
   button.dataset.gallerySrc = managedSource(item, 1920, "webp");
@@ -319,51 +357,269 @@ function capturedYears(): string {
   return years.length === 1 ? years[0]! : `${years[0]}–${years.at(-1)}`;
 }
 
+function itemsInVisualOrder(
+  sections = manifest.sections,
+  items = manifest.items,
+): GalleryManifestItem[] {
+  return sections.flatMap((section) =>
+    items.filter((item) => item.sectionId === section.id),
+  );
+}
+
+function createSectionElement(): HTMLElement {
+  const section = document.createElement("section");
+  const header = document.createElement("header");
+  const heading = document.createElement("div");
+  const number = document.createElement("p");
+  const title = document.createElement("h2");
+  const description = document.createElement("p");
+  const meta = document.createElement("div");
+  const count = document.createElement("span");
+  const edit = document.createElement("button");
+  const drag = document.createElement("button");
+  const grid = document.createElement("div");
+  const empty = document.createElement("p");
+
+  section.className = styles.gallerySection;
+  header.className = styles.gallerySectionHeader;
+  number.className = styles.gallerySectionNumber;
+  number.dataset.sectionNumber = "";
+  title.dataset.sectionTitle = "";
+  description.dataset.sectionDescription = "";
+  heading.append(number, title, description);
+
+  meta.className = styles.gallerySectionMeta;
+  count.dataset.sectionCount = "";
+  for (const button of [edit, drag]) {
+    button.className = styles.gallerySectionEditButton;
+    button.type = "button";
+  }
+  edit.dataset.sectionSelect = "";
+  drag.dataset.sectionDrag = "";
+  drag.draggable = true;
+  edit.textContent = "編集";
+  drag.textContent = "Drag";
+  meta.append(count, edit, drag);
+  header.append(heading, meta);
+
+  grid.className = styles.galleryGrid;
+  grid.dataset.galleryGrid = "";
+  grid.dataset.sectionGrid = "";
+  empty.className = styles.gallerySectionEmpty;
+  empty.dataset.sectionEmpty = "";
+  empty.textContent = "写真をここへドラッグ";
+  grid.append(empty);
+  section.append(header, grid);
+  return section;
+}
+
+function updateSectionElement(
+  element: HTMLElement,
+  section: GallerySection,
+  index: number,
+  itemCount: number,
+): HTMLElement {
+  element.className = styles.gallerySection;
+  element.dataset.gallerySection = "";
+  element.dataset.sectionId = section.id;
+
+  const number = element.querySelector("[data-section-number]");
+  const title = element.querySelector("[data-section-title]");
+  const description = element.querySelector("[data-section-description]");
+  const count = element.querySelector("[data-section-count]");
+  const edit = element.querySelector("[data-section-select]");
+  const drag = element.querySelector("[data-section-drag]");
+  const grid = element.querySelector("[data-section-grid]");
+  let empty = element.querySelector<HTMLElement>("[data-section-empty]");
+  if (
+    !(number instanceof HTMLElement) ||
+    !(title instanceof HTMLElement) ||
+    !(description instanceof HTMLElement) ||
+    !(count instanceof HTMLElement) ||
+    !(edit instanceof HTMLButtonElement) ||
+    !(drag instanceof HTMLButtonElement) ||
+    !(grid instanceof HTMLElement)
+  ) {
+    throw new Error(`Gallery section ${section.id} has invalid markup.`);
+  }
+
+  number.textContent = `Section ${String(index + 1).padStart(2, "0")}`;
+  title.textContent = section.title;
+  description.textContent = section.description;
+  description.hidden = section.description.length === 0;
+  count.textContent = `${String(itemCount).padStart(2, "0")} works`;
+  edit.hidden = previewOnly;
+  edit.ariaLabel = `${section.title}セクションを編集`;
+  edit.ariaPressed = String(
+    selection?.kind === "section" && selection.id === section.id,
+  );
+  drag.hidden = previewOnly;
+  drag.draggable = !previewOnly;
+  drag.ariaLabel = `${section.title}セクションをドラッグして並べ替え`;
+  grid.dataset.sectionId = section.id;
+  grid.ariaLabel = previewOnly
+    ? `${section.title}セクション`
+    : `${section.title}セクションの写真編集`;
+  if (!(empty instanceof HTMLElement)) {
+    empty = document.createElement("p");
+    empty.className = styles.gallerySectionEmpty;
+    empty.dataset.sectionEmpty = "";
+    empty.textContent = "写真をここへドラッグ";
+    grid.append(empty);
+  }
+  empty.hidden = previewOnly || itemCount > 0;
+  return grid;
+}
+
 function renderInspector(): void {
-  const selected = manifest.items.find((item) => item.id === selectedId);
-  const open = Boolean(selected) && !previewOnly;
+  const selectedItemId =
+    selection?.kind === "item" ? selection.id : undefined;
+  const selectedSectionId =
+    selection?.kind === "section" ? selection.id : undefined;
+  const selectedItem =
+    selectedItemId
+      ? manifest.items.find((item) => item.id === selectedItemId)
+      : undefined;
+  const selectedSection =
+    selectedSectionId
+      ? manifest.sections.find((section) => section.id === selectedSectionId)
+      : undefined;
+  const open = Boolean(selectedItem ?? selectedSection) && !previewOnly;
   inspector.dataset.open = String(open);
+  inspector.dataset.editorKind = selectedSection ? "section" : "item";
   inspector.setAttribute("aria-hidden", String(!open));
   inspector.inert = !open;
 
-  if (!selected) {
+  const photoBody = inspector.querySelector("[data-inspector-photo]");
+  const sectionBody = inspector.querySelector("[data-inspector-section]");
+  if (photoBody instanceof HTMLElement) {
+    photoBody.hidden = !selectedItem;
+  }
+  if (sectionBody instanceof HTMLElement) {
+    sectionBody.hidden = !selectedSection;
+  }
+
+  if (!selectedItem && !selectedSection) {
     return;
   }
 
   const inspectorTitle = inspector.querySelector("[data-inspector-title]");
   const inspectorPosition = inspector.querySelector("[data-inspector-position]");
-  if (inspectorTitle instanceof HTMLElement) {
-    inspectorTitle.textContent = selected.title;
-  }
-  if (inspectorPosition instanceof HTMLElement) {
-    inspectorPosition.textContent = `${String(
-      manifest.items.findIndex((item) => item.id === selected.id) + 1,
-    )} / ${String(manifest.items.length)}`;
+
+  if (selectedItem) {
+    if (inspectorTitle instanceof HTMLElement) {
+      inspectorTitle.textContent = selectedItem.title;
+    }
+    if (inspectorPosition instanceof HTMLElement) {
+      const section = manifest.sections.find(
+        (candidate) => candidate.id === selectedItem.sectionId,
+      );
+      const sectionItems = manifest.items.filter(
+        (item) => item.sectionId === selectedItem.sectionId,
+      );
+      inspectorPosition.textContent = `${section?.title ?? "Section"} · ${String(
+        sectionItems.findIndex((item) => item.id === selectedItem.id) + 1,
+      )} / ${String(sectionItems.length)}`;
+    }
+
+    const sectionSelect = inspector.querySelector("[data-item-section-select]");
+    if (sectionSelect instanceof HTMLSelectElement) {
+      const signature = manifest.sections
+        .map((section) => `${section.id}:${section.title}`)
+        .join("|");
+      if (sectionSelect.dataset.optionsSignature !== signature) {
+        sectionSelect.replaceChildren(
+          ...manifest.sections.map((section) => {
+            const option = document.createElement("option");
+            option.value = section.id;
+            option.textContent = section.title;
+            return option;
+          }),
+        );
+        sectionSelect.dataset.optionsSignature = signature;
+      }
+    }
+
+    const values: Readonly<Record<string, string>> = {
+      title: selectedItem.title,
+      date: selectedItem.date ?? "",
+      alt: selectedItem.alt,
+      layout: selectedItem.layout,
+      sectionId: selectedItem.sectionId,
+      "focal-x": String(Math.round(selectedItem.focalPoint.x * 100)),
+      "focal-y": String(Math.round(selectedItem.focalPoint.y * 100)),
+    };
+    inspector.querySelectorAll("[data-inspector-input]").forEach((element) => {
+      if (
+        !(
+          element instanceof HTMLInputElement ||
+          element instanceof HTMLTextAreaElement ||
+          element instanceof HTMLSelectElement
+        )
+      ) {
+        return;
+      }
+      const key = element.dataset.inspectorInput;
+      if (key && values[key] !== undefined && element.value !== values[key]) {
+        element.value = values[key];
+      }
+    });
+    return;
   }
 
-  const values: Readonly<Record<string, string>> = {
-    title: selected.title,
-    date: selected.date ?? "",
-    alt: selected.alt,
-    layout: selected.layout,
-    "focal-x": String(Math.round(selected.focalPoint.x * 100)),
-    "focal-y": String(Math.round(selected.focalPoint.y * 100)),
+  if (!selectedSection) {
+    return;
+  }
+  if (inspectorTitle instanceof HTMLElement) {
+    inspectorTitle.textContent = selectedSection.title;
+  }
+  if (inspectorPosition instanceof HTMLElement) {
+    inspectorPosition.textContent = `Section ${String(
+      manifest.sections.findIndex(
+        (section) => section.id === selectedSection.id,
+      ) + 1,
+    )} / ${String(manifest.sections.length)}`;
+  }
+  const sectionValues: Readonly<Record<string, string>> = {
+    title: selectedSection.title,
+    description: selectedSection.description,
   };
-  inspector.querySelectorAll("[data-inspector-input]").forEach((element) => {
+  inspector.querySelectorAll("[data-section-input]").forEach((element) => {
     if (
       !(
         element instanceof HTMLInputElement ||
-        element instanceof HTMLTextAreaElement ||
-        element instanceof HTMLSelectElement
+        element instanceof HTMLTextAreaElement
       )
     ) {
       return;
     }
-    const key = element.dataset.inspectorInput;
-    if (key && values[key] !== undefined && element.value !== values[key]) {
-      element.value = values[key];
+    const key = element.dataset.sectionInput;
+    if (
+      key &&
+      sectionValues[key] !== undefined &&
+      element.value !== sectionValues[key]
+    ) {
+      element.value = sectionValues[key];
     }
   });
+}
+
+function animationKey(element: HTMLElement): string | null {
+  if (element.dataset.galleryId) {
+    return `item:${element.dataset.galleryId}`;
+  }
+  if (element.dataset.gallerySection !== undefined && element.dataset.sectionId) {
+    return `section:${element.dataset.sectionId}`;
+  }
+  return null;
+}
+
+function layoutElements(): HTMLElement[] {
+  return Array.from(
+    canvas.querySelectorAll<HTMLElement>(
+      "[data-gallery-section], [data-gallery-id]",
+    ),
+  );
 }
 
 function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
@@ -371,11 +627,41 @@ function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
     return;
   }
 
-  grid.querySelectorAll<HTMLElement>("[data-gallery-id]").forEach((figure) => {
-    const id = figure.dataset.galleryId;
-    const previous = id ? before.get(id) : undefined;
+  const records = layoutElements().map((element) => {
+    const key = animationKey(element);
+    return {
+      element,
+      key,
+      previous: key ? before.get(key) : undefined,
+      current: element.getBoundingClientRect(),
+    };
+  });
+  const animatedSectionIds = new Set(
+    records.flatMap(({ element, key, previous, current }) => {
+      if (!key?.startsWith("section:")) {
+        return [];
+      }
+      const moved =
+        !previous ||
+        previous.left !== current.left ||
+        previous.top !== current.top;
+      return moved && element.dataset.sectionId
+        ? [element.dataset.sectionId]
+        : [];
+    }),
+  );
+
+  records.forEach(({ element, key, previous, current }) => {
+    if (key?.startsWith("item:")) {
+      const sectionId = element.closest<HTMLElement>(
+        "[data-gallery-section]",
+      )?.dataset.sectionId;
+      if (sectionId && animatedSectionIds.has(sectionId)) {
+        return;
+      }
+    }
     if (!previous) {
-      figure.animate(
+      element.animate(
         [
           { opacity: 0, transform: "translateY(0.5rem)" },
           { opacity: 1, transform: "none" },
@@ -385,11 +671,10 @@ function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
       return;
     }
 
-    const current = figure.getBoundingClientRect();
     const x = previous.left - current.left;
     const y = previous.top - current.top;
     if (x !== 0 || y !== 0) {
-      figure.animate(
+      element.animate(
         [
           { transform: `translate(${String(x)}px, ${String(y)}px)` },
           { transform: "none" },
@@ -403,33 +688,72 @@ function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
 function render(animate = false): void {
   const before = new Map<string, DOMRect>();
   if (animate) {
-    grid.querySelectorAll<HTMLElement>("[data-gallery-id]").forEach((figure) => {
-      const id = figure.dataset.galleryId;
-      if (id) {
-        before.set(id, figure.getBoundingClientRect());
+    layoutElements().forEach((element) => {
+      const key = animationKey(element);
+      if (key) {
+        before.set(key, element.getBoundingClientRect());
       }
     });
   }
 
-  const existing = new Map<string, HTMLElement>();
-  grid.querySelectorAll<HTMLElement>("[data-gallery-id]").forEach((figure) => {
+  const existingFigures = new Map<string, HTMLElement>();
+  canvas.querySelectorAll<HTMLElement>("[data-gallery-id]").forEach((figure) => {
     const id = figure.dataset.galleryId;
     if (id) {
-      existing.set(id, figure);
+      existingFigures.set(id, figure);
     }
   });
 
   const activeIds = new Set(manifest.items.map((item) => item.id));
-  for (const [id, figure] of existing) {
+  for (const [id, figure] of existingFigures) {
     if (!activeIds.has(id)) {
       figure.remove();
     }
   }
 
-  manifest.items.forEach((item, index) => {
-    const figure = existing.get(item.id) ?? createFigure(item);
-    updateFigure(figure, item, index);
-    grid.append(figure);
+  const existingSections = new Map<string, HTMLElement>();
+  canvas
+    .querySelectorAll<HTMLElement>("[data-gallery-section]")
+    .forEach((section) => {
+      const id = section.dataset.sectionId;
+      if (id) {
+        existingSections.set(id, section);
+      }
+    });
+  const activeSectionIds = new Set(
+    manifest.sections.map((section) => section.id),
+  );
+  for (const [id, section] of existingSections) {
+    if (!activeSectionIds.has(id)) {
+      section.remove();
+    }
+  }
+
+  manifest.sections.forEach((section, sectionIndex) => {
+    const sectionItems = manifest.items.filter(
+      (item) => item.sectionId === section.id,
+    );
+    const element =
+      existingSections.get(section.id) ?? createSectionElement();
+    const grid = updateSectionElement(
+      element,
+      section,
+      sectionIndex,
+      sectionItems.length,
+    );
+    canvas.append(element);
+    sectionItems.forEach((item) => {
+      const index = manifest.items.findIndex(
+        (candidate) => candidate.id === item.id,
+      );
+      const figure = existingFigures.get(item.id) ?? createFigure(item);
+      updateFigure(figure, item, index);
+      grid.append(figure);
+    });
+    const empty = grid.querySelector("[data-section-empty]");
+    if (empty instanceof HTMLElement) {
+      grid.append(empty);
+    }
   });
 
   const count = root.querySelector("[data-gallery-count]");
@@ -538,13 +862,16 @@ async function performSave(): Promise<boolean> {
     return true;
   }
 
-  if (itemFingerprint(manifest.items) === itemFingerprint(confirmedManifest.items)) {
+  if (
+    contentFingerprint(cloneContent(manifest)) ===
+    contentFingerprint(cloneContent(confirmedManifest))
+  ) {
     setStatus("下書きは同期済み");
     return true;
   }
 
-  const sentItems = cloneItems();
-  const sentFingerprint = itemFingerprint(sentItems);
+  const sentContent = cloneContent();
+  const sentFingerprint = contentFingerprint(sentContent);
   setStatus("下書きを保存中", "saving");
   saveButton.disabled = true;
   publishButton.disabled = true;
@@ -557,7 +884,8 @@ async function performSave(): Promise<boolean> {
       body: JSON.stringify({
         baseVersion: manifest.version,
         mutationId: crypto.randomUUID(),
-        items: sentItems,
+        sections: sentContent.sections,
+        items: sentContent.items,
       }),
     });
 
@@ -568,7 +896,7 @@ async function performSave(): Promise<boolean> {
           (value as Record<string, unknown>).manifest,
         );
         if (canonical.success) {
-          pushUndo(cloneItems());
+          pushUndo(cloneContent());
           manifest = structuredClone(canonical.data);
           confirmedManifest = structuredClone(canonical.data);
           render(true);
@@ -590,7 +918,7 @@ async function performSave(): Promise<boolean> {
         : {};
     const saved = galleryManifestSchema.parse(responseRecord.manifest);
     confirmedManifest = structuredClone(saved);
-    if (itemFingerprint(manifest.items) === sentFingerprint) {
+    if (contentFingerprint(cloneContent()) === sentFingerprint) {
       manifest = structuredClone(saved);
     } else {
       manifest = {
@@ -604,14 +932,14 @@ async function performSave(): Promise<boolean> {
     setStatus("下書きは同期済み");
     return true;
   } catch (error) {
-    const localItems = cloneItems();
+    const localContent = cloneContent();
     const canonical = await fetchCanonicalDraft();
     if (canonical) {
-      pushUndo(localItems);
+      pushUndo(localContent);
       confirmedManifest = structuredClone(canonical);
 
-      if (itemFingerprint(canonical.items) === sentFingerprint) {
-        if (itemFingerprint(localItems) === sentFingerprint) {
+      if (contentFingerprint(cloneContent(canonical)) === sentFingerprint) {
+        if (contentFingerprint(localContent) === sentFingerprint) {
           manifest = structuredClone(canonical);
           setStatus("下書きは同期済み");
         } else {
@@ -637,7 +965,7 @@ async function performSave(): Promise<boolean> {
       return false;
     }
 
-    pushUndo(cloneItems());
+    pushUndo(cloneContent());
     manifest = structuredClone(confirmedManifest);
     render(true);
     setStatus("保存できませんでした", "error");
@@ -653,23 +981,26 @@ async function performSave(): Promise<boolean> {
   }
 }
 
-async function saveDraft(): Promise<boolean> {
-  if (saveInFlight) {
+function saveDraft(): Promise<boolean> {
+  if (saveQueue) {
     saveAgain = true;
-    return saveInFlight;
+    return saveQueue;
   }
 
-  saveInFlight = performSave();
-  const saved = await saveInFlight;
-  saveInFlight = null;
-  if (saved && saveAgain && !importInProgress) {
-    saveAgain = false;
-    return saveDraft();
-  }
-  if (!saved) {
-    saveAgain = false;
-  }
-  return saved;
+  saveQueue = (async () => {
+    let saved = true;
+    do {
+      saveAgain = false;
+      saved = await performSave();
+    } while (saved && saveAgain && !importInProgress);
+    if (!saved) {
+      saveAgain = false;
+    }
+    return saved;
+  })().finally(() => {
+    saveQueue = null;
+  });
+  return saveQueue;
 }
 
 async function publish(): Promise<void> {
@@ -727,7 +1058,17 @@ async function publish(): Promise<void> {
 }
 
 function selectedIndex(): number {
-  return manifest.items.findIndex((item) => item.id === selectedId);
+  const id = selection?.kind === "item" ? selection.id : undefined;
+  return id
+    ? manifest.items.findIndex((item) => item.id === id)
+    : -1;
+}
+
+function selectedSectionIndex(): number {
+  const id = selection?.kind === "section" ? selection.id : undefined;
+  return id
+    ? manifest.sections.findIndex((section) => section.id === id)
+    : -1;
 }
 
 function moveSelected(offset: number): void {
@@ -746,10 +1087,78 @@ function moveSelected(offset: number): void {
   if (!item) {
     return;
   }
-  items.splice(to, 0, item);
-  manifest = { ...manifest, items };
+  const target = manifest.items[to];
+  items.splice(to, 0, {
+    ...item,
+    sectionId: target?.sectionId ?? item.sectionId,
+  });
+  manifest = {
+    ...manifest,
+    items: itemsInVisualOrder(manifest.sections, items),
+  };
   render(true);
   showToast(`${item.title}を${String(to + 1)}番目へ移動しました。`);
+  scheduleSave();
+}
+
+function moveSelectedSection(offset: number): void {
+  const from = selectedSectionIndex();
+  const to = Math.min(
+    Math.max(from + offset, 0),
+    manifest.sections.length - 1,
+  );
+  if (from < 0 || from === to) {
+    return;
+  }
+
+  pushUndo();
+  const sections = structuredClone(manifest.sections);
+  const [section] = sections.splice(from, 1);
+  if (!section) {
+    return;
+  }
+  sections.splice(to, 0, section);
+  manifest = {
+    ...manifest,
+    sections,
+    items: itemsInVisualOrder(sections),
+  };
+  render(true);
+  showToast(`${section.title}をSection ${String(to + 1)}へ移動しました。`);
+  scheduleSave();
+}
+
+function addSection(): void {
+  if (manifest.sections.length >= 50) {
+    showToast("セクションは50件まで追加できます。");
+    return;
+  }
+
+  pushUndo();
+  const section: GallerySection = {
+    id: crypto.randomUUID(),
+    title: `新しいセクション ${String(manifest.sections.length + 1)}`,
+    description: "",
+  };
+  const sections = structuredClone(manifest.sections);
+  const selected = selectedSectionIndex();
+  const index = selected >= 0 ? selected + 1 : sections.length;
+  sections.splice(index, 0, section);
+  manifest = {
+    ...manifest,
+    sections,
+    items: itemsInVisualOrder(sections),
+  };
+  selection = { kind: "section", id: section.id };
+  render(true);
+  const titleInput = inspector.querySelector(
+    "[data-section-input='title']",
+  );
+  if (titleInput instanceof HTMLInputElement) {
+    titleInput.focus({ preventScroll: true });
+    titleInput.select();
+  }
+  showToast("セクションを追加しました。名前と説明を編集できます。");
   scheduleSave();
 }
 
@@ -769,7 +1178,7 @@ function removeSelected(): void {
     ...manifest,
     items: manifest.items.filter((item) => item.id !== removed.id),
   };
-  selectedId = null;
+  selection = null;
   render(true);
   showToast(`${removed.title}を下書きから外しました。元データは削除していません。`);
   scheduleSave();
@@ -781,9 +1190,26 @@ function restoreUndo(): void {
     return;
   }
 
-  manifest = { ...manifest, items: structuredClone(previous) };
-  if (selectedId && !manifest.items.some((item) => item.id === selectedId)) {
-    selectedId = null;
+  manifest = {
+    ...manifest,
+    sections: structuredClone(previous.sections),
+    items: structuredClone(previous.items),
+  };
+  const selectedItemId =
+    selection?.kind === "item" ? selection.id : undefined;
+  if (
+    selectedItemId &&
+    !manifest.items.some((item) => item.id === selectedItemId)
+  ) {
+    selection = null;
+  }
+  const selectedSectionId =
+    selection?.kind === "section" ? selection.id : undefined;
+  if (
+    selectedSectionId &&
+    !manifest.sections.some((section) => section.id === selectedSectionId)
+  ) {
+    selection = null;
   }
   render(true);
   showToast("直前の編集を元に戻しました。");
@@ -809,6 +1235,11 @@ function updateSelected(field: string, value: string): void {
     (value === "standard" || value === "wide" || value === "feature")
   ) {
     updated = { ...current, layout: value };
+  } else if (
+    field === "sectionId" &&
+    manifest.sections.some((section) => section.id === value)
+  ) {
+    updated = { ...current, sectionId: value };
   } else if (field === "focal-x" || field === "focal-y") {
     const point = Math.min(Math.max(Number(value) / 100, 0), 1);
     updated = {
@@ -823,9 +1254,47 @@ function updateSelected(field: string, value: string): void {
   }
 
   const items = cloneItems();
-  items[index] = updated;
-  manifest = { ...manifest, items };
-  render(field === "layout");
+  if (field === "sectionId" && updated.sectionId !== current.sectionId) {
+    items.splice(index, 1);
+    const lastTargetIndex = items.findLastIndex(
+      (item) => item.sectionId === updated.sectionId,
+    );
+    items.splice(lastTargetIndex + 1, 0, updated);
+  } else {
+    items[index] = updated;
+  }
+  manifest = {
+    ...manifest,
+    items: itemsInVisualOrder(manifest.sections, items),
+  };
+  render(field === "layout" || field === "sectionId");
+  scheduleSave();
+}
+
+function updateSelectedSection(field: string, value: string): void {
+  const index = selectedSectionIndex();
+  const current = manifest.sections[index];
+  if (!current) {
+    return;
+  }
+
+  let updated: GallerySection;
+  if (field === "title") {
+    if (value.trim().length === 0) {
+      setStatus("セクション名を入力してください", "error");
+      return;
+    }
+    updated = { ...current, title: value };
+  } else if (field === "description") {
+    updated = { ...current, description: value };
+  } else {
+    return;
+  }
+
+  const sections = structuredClone(manifest.sections);
+  sections[index] = updated;
+  manifest = { ...manifest, sections };
+  render();
   scheduleSave();
 }
 
@@ -946,6 +1415,24 @@ async function importFiles(inputFiles: readonly File[]): Promise<void> {
   pushUndo();
   setStatus(`${String(files.length)}枚を読み込み中`, "saving");
 
+  const selectedImportItemId =
+    selection?.kind === "item" ? selection.id : undefined;
+  const targetSectionId =
+    selection?.kind === "section"
+      ? selection.id
+      : selectedImportItemId
+        ? manifest.items.find((item) => item.id === selectedImportItemId)
+            ?.sectionId
+        : manifest.sections.at(-1)?.id;
+  if (!targetSectionId) {
+    importInProgress = false;
+    importButton.disabled = false;
+    saveButton.disabled = false;
+    publishButton.disabled = false;
+    showToast("写真を追加するセクションがありません。");
+    return;
+  }
+
   const pending: Array<{ readonly file: File; readonly item: GalleryManifestItem }> = [];
   for (const [index, file] of files.entries()) {
     try {
@@ -954,6 +1441,7 @@ async function importFiles(inputFiles: readonly File[]): Promise<void> {
       const date = imageDate(file);
       const item: GalleryManifestItem = {
         id,
+        sectionId: targetSectionId,
         title: date ? `VRChat ${date}` : `VRChat ${String(index + 1).padStart(2, "0")}`,
         date,
         alt: "VRChatで撮影したスクリーンショット",
@@ -972,7 +1460,10 @@ async function importFiles(inputFiles: readonly File[]): Promise<void> {
 
   manifest = {
     ...manifest,
-    items: [...manifest.items, ...pending.map(({ item }) => item)],
+    items: itemsInVisualOrder(manifest.sections, [
+      ...manifest.items,
+      ...pending.map(({ item }) => item),
+    ]),
   };
   render(true);
 
@@ -1075,35 +1566,170 @@ async function chooseFolder(): Promise<void> {
   }
 }
 
-grid.addEventListener("click", (event) => {
+function clearDropIndicators(): void {
+  canvas
+    .querySelectorAll<HTMLElement>(
+      "[data-dragging], [data-drop-active], [data-item-drop], [data-section-drop]",
+    )
+    .forEach((element) => {
+      delete element.dataset.dragging;
+      delete element.dataset.dropActive;
+      delete element.dataset.itemDrop;
+      delete element.dataset.sectionDrop;
+    });
+}
+
+function pointerDropPosition(
+  element: HTMLElement,
+  event: DragEvent,
+): "before" | "after" {
+  const bounds = element.getBoundingClientRect();
+  return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+}
+
+function dropItem(
+  sourceId: string,
+  targetSectionId: string,
+  targetId: string | undefined,
+  position: "before" | "after",
+  snapshot: GalleryContent,
+): void {
+  const source = manifest.items.find((item) => item.id === sourceId);
+  if (!source || targetId === sourceId) {
+    return;
+  }
+
+  const groups = new Map(
+    manifest.sections.map((section) => [
+      section.id,
+      manifest.items.filter(
+        (item) => item.sectionId === section.id && item.id !== sourceId,
+      ),
+    ]),
+  );
+  const targetItems = groups.get(targetSectionId);
+  if (!targetItems) {
+    return;
+  }
+  const targetIndex = targetId
+    ? targetItems.findIndex((item) => item.id === targetId)
+    : -1;
+  const insertionIndex =
+    targetIndex < 0
+      ? targetItems.length
+      : targetIndex + (position === "after" ? 1 : 0);
+  targetItems.splice(insertionIndex, 0, {
+    ...source,
+    sectionId: targetSectionId,
+  });
+  const items = manifest.sections.flatMap(
+    (section) => groups.get(section.id) ?? [],
+  );
+  const next = { sections: structuredClone(manifest.sections), items };
+  if (contentFingerprint(next) === contentFingerprint(cloneContent())) {
+    return;
+  }
+
+  pushUndo(snapshot);
+  manifest = { ...manifest, items };
+  selection = { kind: "item", id: sourceId };
+  render(true);
+  const section = manifest.sections.find(
+    (candidate) => candidate.id === targetSectionId,
+  );
+  showToast(
+    `${source.title}を${section?.title ?? "セクション"}の${String(
+      insertionIndex + 1,
+    )}番目へ移動しました。`,
+  );
+  scheduleSave();
+}
+
+function dropSection(
+  sourceId: string,
+  targetId: string,
+  position: "before" | "after",
+  snapshot: GalleryContent,
+): void {
+  if (sourceId === targetId) {
+    return;
+  }
+  const sections = structuredClone(manifest.sections);
+  const sourceIndex = sections.findIndex((section) => section.id === sourceId);
+  const [moved] = sourceIndex >= 0 ? sections.splice(sourceIndex, 1) : [];
+  const targetIndex = sections.findIndex((section) => section.id === targetId);
+  if (!moved || targetIndex < 0) {
+    return;
+  }
+  sections.splice(
+    targetIndex + (position === "after" ? 1 : 0),
+    0,
+    moved,
+  );
+  pushUndo(snapshot);
+  manifest = {
+    ...manifest,
+    sections,
+    items: itemsInVisualOrder(sections),
+  };
+  selection = { kind: "section", id: sourceId };
+  render(true);
+  showToast(`${moved.title}の表示順を変更しました。`);
+  scheduleSave();
+}
+
+canvas.addEventListener("click", (event) => {
   if (previewOnly) {
     return;
   }
   const target = event.target;
-  const button =
+  const photoButton =
     target instanceof Element
       ? target.closest<HTMLButtonElement>("[data-gallery-select]")
       : null;
-  const figure = button?.closest<HTMLElement>("[data-gallery-id]");
-  if (!button || !figure?.dataset.galleryId) {
+  const figure = photoButton?.closest<HTMLElement>("[data-gallery-id]");
+  if (photoButton && figure?.dataset.galleryId) {
+    selection = { kind: "item", id: figure.dataset.galleryId };
+    render();
+    figure.scrollIntoView({
+      block: window.matchMedia("(min-width: 64rem)").matches
+        ? "center"
+        : "start",
+      inline: "nearest",
+    });
+    const titleInput = inspector.querySelector(
+      "[data-inspector-input='title']",
+    );
+    if (titleInput instanceof HTMLInputElement) {
+      titleInput.focus({ preventScroll: true });
+    }
     return;
   }
-  selectedId = figure.dataset.galleryId;
-  render();
-  figure.scrollIntoView({
-    block: window.matchMedia("(min-width: 64rem)").matches ? "center" : "start",
-    inline: "nearest",
-  });
-  const titleInput = inspector.querySelector(
-    "[data-inspector-input='title']",
+
+  const sectionButton =
+    target instanceof Element
+      ? target.closest<HTMLButtonElement>("[data-section-select]")
+      : null;
+  const section = sectionButton?.closest<HTMLElement>(
+    "[data-gallery-section]",
   );
-  if (titleInput instanceof HTMLInputElement) {
-    titleInput.focus({ preventScroll: true });
+  if (sectionButton && section?.dataset.sectionId) {
+    selection = { kind: "section", id: section.dataset.sectionId };
+    render();
+    const titleInput = inspector.querySelector(
+      "[data-section-input='title']",
+    );
+    if (titleInput instanceof HTMLInputElement) {
+      titleInput.focus({ preventScroll: true });
+    }
   }
 });
 
-grid.addEventListener("keydown", (event) => {
-  if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) {
+canvas.addEventListener("keydown", (event) => {
+  if (
+    !event.altKey ||
+    !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+  ) {
     return;
   }
   const target = event.target;
@@ -1111,84 +1737,190 @@ grid.addEventListener("keydown", (event) => {
     target instanceof Element
       ? target.closest<HTMLElement>("[data-gallery-id]")
       : null;
-  if (!figure?.dataset.galleryId) {
+  if (figure?.dataset.galleryId) {
+    event.preventDefault();
+    selection = { kind: "item", id: figure.dataset.galleryId };
+    moveSelected(
+      event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1,
+    );
     return;
   }
-  event.preventDefault();
-  selectedId = figure.dataset.galleryId;
-  moveSelected(event.key === "ArrowLeft" ? -1 : 1);
+
+  const section =
+    target instanceof Element
+      ? target.closest<HTMLElement>("[data-gallery-section]")
+      : null;
+  if (section?.dataset.sectionId) {
+    event.preventDefault();
+    selection = { kind: "section", id: section.dataset.sectionId };
+    moveSelectedSection(
+      event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1,
+    );
+  }
 });
 
-grid.addEventListener("dragstart", (event) => {
+canvas.addEventListener("dragstart", (event) => {
   const target = event.target;
   const figure =
     target instanceof Element
       ? target.closest<HTMLElement>("[data-gallery-id]")
       : null;
-  if (!figure?.dataset.galleryId || previewOnly) {
+  if (figure?.dataset.galleryId && !previewOnly) {
+    const id = figure.dataset.galleryId;
+    selection = { kind: "item", id };
+    dragState = { kind: "item", id, snapshot: cloneContent() };
+    figure.dataset.dragging = "true";
+    event.dataTransfer?.setData("text/plain", `item:${id}`);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+    return;
+  }
+
+  const dragButton =
+    target instanceof Element
+      ? target.closest<HTMLButtonElement>("[data-section-drag]")
+      : null;
+  const section = dragButton?.closest<HTMLElement>(
+    "[data-gallery-section]",
+  );
+  if (!section?.dataset.sectionId || previewOnly) {
     event.preventDefault();
     return;
   }
-  selectedId = figure.dataset.galleryId;
-  dragStartItems = cloneItems();
-  figure.dataset.dragging = "true";
-  event.dataTransfer?.setData("text/plain", figure.dataset.galleryId);
+  const id = section.dataset.sectionId;
+  selection = { kind: "section", id };
+  dragState = { kind: "section", id, snapshot: cloneContent() };
+  section.dataset.dragging = "true";
+  event.dataTransfer?.setData("text/plain", `section:${id}`);
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "move";
   }
 });
 
-grid.addEventListener("dragover", (event) => {
-  if (!previewOnly) {
+canvas.addEventListener("dragover", (event) => {
+  if (previewOnly || !dragState) {
+    return;
+  }
+  const target = event.target;
+  clearDropIndicators();
+  const sourceElement =
+    dragState.kind === "item"
+      ? canvas.querySelector<HTMLElement>(
+          `[data-gallery-id="${CSS.escape(dragState.id)}"]`,
+        )
+      : canvas.querySelector<HTMLElement>(
+          `[data-gallery-section][data-section-id="${CSS.escape(dragState.id)}"]`,
+        );
+  if (sourceElement) {
+    sourceElement.dataset.dragging = "true";
+  }
+
+  if (dragState.kind === "item") {
+    const grid =
+      target instanceof Element
+        ? target.closest<HTMLElement>("[data-section-grid]")
+        : null;
+    if (!grid?.dataset.sectionId) {
+      return;
+    }
     event.preventDefault();
+    grid.dataset.dropActive = "true";
+    const figure =
+      target instanceof Element
+        ? target.closest<HTMLElement>("[data-gallery-id]")
+        : null;
+    if (figure?.dataset.galleryId !== dragState.id && figure) {
+      figure.dataset.itemDrop = pointerDropPosition(figure, event);
+    }
+  } else {
+    const section =
+      target instanceof Element
+        ? target.closest<HTMLElement>("[data-gallery-section]")
+        : null;
+    if (!section?.dataset.sectionId || section.dataset.sectionId === dragState.id) {
+      return;
+    }
+    event.preventDefault();
+    const header = section.querySelector<HTMLElement>("header");
+    section.dataset.sectionDrop = pointerDropPosition(
+      header ?? section,
+      event,
+    );
+  }
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "move";
   }
 });
 
-grid.addEventListener("drop", (event) => {
+canvas.addEventListener("drop", (event) => {
+  if (!dragState) {
+    return;
+  }
   event.preventDefault();
   const target = event.target;
-  const targetFigure =
-    target instanceof Element
-      ? target.closest<HTMLElement>("[data-gallery-id]")
-      : null;
-  const sourceId = event.dataTransfer?.getData("text/plain");
-  const targetId = targetFigure?.dataset.galleryId;
-  if (!sourceId || !targetId || sourceId === targetId || !dragStartItems) {
-    dragStartItems = null;
-    return;
+  const currentDrag = dragState;
+  dragState = null;
+  if (currentDrag.kind === "item") {
+    const grid =
+      target instanceof Element
+        ? target.closest<HTMLElement>("[data-section-grid]")
+        : null;
+    const figure =
+      target instanceof Element
+        ? target.closest<HTMLElement>("[data-gallery-id]")
+        : null;
+    const targetSectionId = grid?.dataset.sectionId;
+    if (targetSectionId) {
+      dropItem(
+        currentDrag.id,
+        targetSectionId,
+        figure?.dataset.galleryId,
+        figure?.dataset.itemDrop === "after" ? "after" : "before",
+        currentDrag.snapshot,
+      );
+    }
+  } else {
+    const section =
+      target instanceof Element
+        ? target.closest<HTMLElement>("[data-gallery-section]")
+        : null;
+    const targetId = section?.dataset.sectionId;
+    if (targetId) {
+      dropSection(
+        currentDrag.id,
+        targetId,
+        section.dataset.sectionDrop === "after" ? "after" : "before",
+        currentDrag.snapshot,
+      );
+    }
   }
-
-  const items = cloneItems();
-  const sourceIndex = items.findIndex((item) => item.id === sourceId);
-  const targetIndex = items.findIndex((item) => item.id === targetId);
-  const [moved] = sourceIndex >= 0 ? items.splice(sourceIndex, 1) : [];
-  if (!moved || targetIndex < 0) {
-    dragStartItems = null;
-    return;
-  }
-  pushUndo(dragStartItems);
-  items.splice(targetIndex, 0, moved);
-  manifest = { ...manifest, items };
-  dragStartItems = null;
-  render(true);
-  scheduleSave();
+  clearDropIndicators();
 });
 
-grid.addEventListener("dragend", () => {
-  grid.querySelectorAll<HTMLElement>("[data-dragging]").forEach((figure) => {
-    delete figure.dataset.dragging;
-  });
-  dragStartItems = null;
+canvas.addEventListener("dragleave", (event) => {
+  if (
+    event.relatedTarget instanceof Node &&
+    canvas.contains(event.relatedTarget)
+  ) {
+    return;
+  }
+  clearDropIndicators();
+});
+
+canvas.addEventListener("dragend", () => {
+  clearDropIndicators();
+  dragState = null;
 });
 
 inspector.addEventListener("focusin", (event) => {
   const target = event.target;
   if (
     target instanceof HTMLElement &&
-    target.matches("[data-inspector-input]") &&
+    target.matches("[data-inspector-input], [data-section-input]") &&
     !inspectorEditStart
   ) {
-    inspectorEditStart = cloneItems();
+    inspectorEditStart = cloneContent();
   }
 });
 
@@ -1196,9 +1928,10 @@ inspector.addEventListener("focusout", (event) => {
   const target = event.target;
   if (
     target instanceof HTMLElement &&
-    target.matches("[data-inspector-input]") &&
+    target.matches("[data-inspector-input], [data-section-input]") &&
     inspectorEditStart &&
-    itemFingerprint(inspectorEditStart) !== itemFingerprint(manifest.items)
+    contentFingerprint(inspectorEditStart) !==
+      contentFingerprint(cloneContent())
   ) {
     pushUndo(inspectorEditStart);
   }
@@ -1219,12 +1952,28 @@ inspector.addEventListener("input", (event) => {
   const field = target.dataset.inspectorInput;
   if (field) {
     updateSelected(field, target.value);
+    return;
+  }
+  const sectionField = target.dataset.sectionInput;
+  if (sectionField) {
+    updateSelectedSection(sectionField, target.value);
   }
 });
 
 inspector.querySelector("[data-inspector-close]")?.addEventListener("click", () => {
-  selectedId = null;
+  const returnFocus =
+    selection?.kind === "item"
+      ? canvas.querySelector<HTMLButtonElement>(
+          `[data-gallery-id="${CSS.escape(selection.id)}"] [data-gallery-select]`,
+        )
+      : selection?.kind === "section"
+        ? canvas.querySelector<HTMLButtonElement>(
+            `[data-gallery-section][data-section-id="${CSS.escape(selection.id)}"] [data-section-select]`,
+          )
+        : null;
+  selection = null;
   renderInspector();
+  returnFocus?.focus({ preventScroll: true });
 });
 inspector.querySelector("[data-gallery-remove]")?.addEventListener("click", removeSelected);
 inspector.querySelectorAll<HTMLButtonElement>("[data-gallery-move]").forEach((button) => {
@@ -1232,6 +1981,16 @@ inspector.querySelectorAll<HTMLButtonElement>("[data-gallery-move]").forEach((bu
     moveSelected(Number(button.dataset.galleryMove));
   });
 });
+inspector.querySelectorAll<HTMLButtonElement>("[data-section-move]").forEach((button) => {
+  button.addEventListener("click", () => {
+    moveSelectedSection(Number(button.dataset.sectionMove));
+  });
+});
+inspector
+  .querySelector("[data-section-focus-import]")
+  ?.addEventListener("click", () => {
+    void chooseFolder();
+  });
 
 undoButton.addEventListener("click", restoreUndo);
 saveButton.addEventListener("click", () => {
@@ -1247,6 +2006,7 @@ publishButton.addEventListener("click", () => {
 importButton.addEventListener("click", () => {
   void chooseFolder();
 });
+addSectionButton.addEventListener("click", addSection);
 folderInput.addEventListener("change", () => {
   const files = folderInput.files ? Array.from(folderInput.files) : [];
   folderInput.value = "";

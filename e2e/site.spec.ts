@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const publicPages = [
   { path: "/", heading: "ねこ。多分技術者。" },
@@ -28,6 +28,75 @@ async function assertNoAxeViolations(page: Page) {
     .join("\n\n");
 
   expect(results.violations, details).toEqual([]);
+}
+
+async function dispatchDragAndDrop(
+  page: Page,
+  source: Locator,
+  target: Locator,
+  position: "before" | "after" = "before",
+): Promise<void> {
+  const sourceHandle = await source.elementHandle();
+  const targetHandle = await target.elementHandle();
+  if (!sourceHandle || !targetHandle) {
+    throw new Error("Drag source or target is missing.");
+  }
+
+  await page.evaluate(
+    ({ sourceElement, targetElement, dropPosition }) => {
+      const transfer = new DataTransfer();
+      const sourceBounds = sourceElement.getBoundingClientRect();
+      const targetBounds = targetElement.getBoundingClientRect();
+      const sourceX = sourceBounds.left + sourceBounds.width / 2;
+      const sourceY = sourceBounds.top + sourceBounds.height / 2;
+      const targetX = targetBounds.left + targetBounds.width / 2;
+      const targetY =
+        dropPosition === "before"
+          ? targetBounds.top + 1
+          : targetBounds.bottom - 1;
+
+      sourceElement.dispatchEvent(
+        new DragEvent("dragstart", {
+          bubbles: true,
+          cancelable: true,
+          clientX: sourceX,
+          clientY: sourceY,
+          dataTransfer: transfer,
+        }),
+      );
+      targetElement.dispatchEvent(
+        new DragEvent("dragover", {
+          bubbles: true,
+          cancelable: true,
+          clientX: targetX,
+          clientY: targetY,
+          dataTransfer: transfer,
+        }),
+      );
+      targetElement.dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          clientX: targetX,
+          clientY: targetY,
+          dataTransfer: transfer,
+        }),
+      );
+      sourceElement.dispatchEvent(
+        new DragEvent("dragend", {
+          bubbles: true,
+          clientX: targetX,
+          clientY: targetY,
+          dataTransfer: transfer,
+        }),
+      );
+    },
+    {
+      sourceElement: sourceHandle,
+      targetElement: targetHandle,
+      dropPosition: position,
+    },
+  );
 }
 
 test("production preview links and applies shared site styles", async ({
@@ -635,12 +704,15 @@ test("Gallery Workbench edits the shared canvas and imports a VRChat image", asy
     if (
       typeof request !== "object" ||
       request === null ||
+      !("sections" in request) ||
+      !Array.isArray(request.sections) ||
       !("items" in request) ||
       !Array.isArray(request.items)
     ) {
       await route.fulfill({ status: 400, body: "Invalid test request" });
       return;
     }
+    const sections = request.sections;
     const items = request.items;
     revision += 1;
     await route.fulfill({
@@ -648,9 +720,10 @@ test("Gallery Workbench edits the shared canvas and imports a VRChat image", asy
       contentType: "application/json",
       body: JSON.stringify({
         manifest: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           version: revision,
           updatedAt: new Date().toISOString(),
+          sections,
           items,
         },
       }),
@@ -748,6 +821,177 @@ test("Gallery Workbench edits the shared canvas and imports a VRChat image", asy
     return width * height;
   });
   expect(overlap).toBe(0);
+  await assertNoAxeViolations(page);
+});
+
+test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
+  page,
+}) => {
+  let revision = 1;
+  let savedSectionTitles: string[] = [];
+  let savedItems: Array<{
+    readonly id: string;
+    readonly sectionId: string;
+  }> = [];
+
+  await page.route("**/admin/gallery/api/draft", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+
+    const request: unknown = route.request().postDataJSON();
+    if (
+      typeof request !== "object" ||
+      request === null ||
+      !("sections" in request) ||
+      !Array.isArray(request.sections) ||
+      !("items" in request) ||
+      !Array.isArray(request.items)
+    ) {
+      await route.fulfill({ status: 400, body: "Invalid test request" });
+      return;
+    }
+
+    const sections = request.sections;
+    const items = request.items;
+    savedSectionTitles = sections.flatMap((section) =>
+      typeof section === "object" &&
+      section !== null &&
+      "title" in section &&
+      typeof section.title === "string"
+        ? [section.title]
+        : [],
+    );
+    savedItems = items.flatMap((item) =>
+      typeof item === "object" &&
+      item !== null &&
+      "id" in item &&
+      typeof item.id === "string" &&
+      "sectionId" in item &&
+      typeof item.sectionId === "string"
+        ? [{ id: item.id, sectionId: item.sectionId }]
+        : [],
+    );
+    revision += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        manifest: {
+          schemaVersion: 2,
+          version: revision,
+          updatedAt: new Date().toISOString(),
+          sections,
+          items,
+        },
+      }),
+    });
+  });
+
+  await page.goto("/admin/gallery/");
+
+  const sections = page.locator("[data-gallery-section]");
+  await expect(sections).toHaveCount(1);
+  await page.locator("[data-section-add]").click();
+  await expect(sections).toHaveCount(2);
+
+  const inspector = page.locator("[data-gallery-inspector]");
+  await expect(inspector).toBeVisible();
+  const sectionTitle = page.getByLabel("セクション名");
+  const sectionDescription = page.getByLabel("セクション説明");
+  await expect(sectionTitle).toBeFocused();
+  await sectionTitle.fill("Night Sessions");
+  await sectionDescription.fill("夜のVRChatで撮影した記録。");
+  await expect(sections.last().locator("[data-section-title]")).toHaveText(
+    "Night Sessions",
+  );
+
+  await page.locator("[data-gallery-save]").click();
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+  await expect.poll(() => savedSectionTitles).toContain("Night Sessions");
+
+  await page.locator("[data-inspector-close]").click();
+  const addedSection = page
+    .locator("[data-gallery-section]")
+    .filter({ hasText: "Night Sessions" });
+  await dispatchDragAndDrop(
+    page,
+    addedSection.locator("[data-section-drag]"),
+    sections.first(),
+  );
+  await expect(sections.first().locator("[data-section-title]")).toHaveText(
+    "Night Sessions",
+  );
+  await page.locator("[data-gallery-save]").click();
+  await expect
+    .poll(() => savedSectionTitles[0])
+    .toBe("Night Sessions");
+
+  await sections.first().locator("[data-section-drag]").focus();
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect(sections.last().locator("[data-section-title]")).toHaveText(
+    "Night Sessions",
+  );
+
+  const sourceFigure = sections
+    .first()
+    .locator("[data-gallery-id]")
+    .first();
+  const sourceId = await sourceFigure.getAttribute("data-gallery-id");
+  if (!sourceId) {
+    throw new Error("The first gallery item has no stable id.");
+  }
+  await dispatchDragAndDrop(
+    page,
+    sourceFigure.locator("[data-gallery-select]"),
+    sections.last().locator("[data-section-empty]"),
+  );
+  await expect(
+    sections.last().locator(`[data-gallery-id="${sourceId}"]`),
+  ).toHaveCount(1);
+  await expect(sections.last().locator("[data-section-count]")).toHaveText(
+    "01 works",
+  );
+  const targetSectionId = await sections
+    .last()
+    .getAttribute("data-section-id");
+  if (!targetSectionId) {
+    throw new Error("The photo drop target has no stable section id.");
+  }
+  await page.locator("[data-gallery-save]").click();
+  await expect
+    .poll(
+      () => savedItems.find((item) => item.id === sourceId)?.sectionId,
+    )
+    .toBe(targetSectionId);
+
+  const movedPhoto = sections
+    .last()
+    .locator(`[data-gallery-id="${sourceId}"] [data-gallery-select]`);
+  await movedPhoto.focus();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(
+    sections.first().locator(`[data-gallery-id="${sourceId}"]`),
+  ).toHaveCount(1);
+
+  const firstSectionId = await sections
+    .first()
+    .getAttribute("data-section-id");
+  if (!firstSectionId) {
+    throw new Error("The first gallery section has no stable id.");
+  }
+  await page.locator("[data-gallery-save]").click();
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+  await expect
+    .poll(
+      () => savedItems.find((item) => item.id === sourceId)?.sectionId,
+    )
+    .toBe(firstSectionId);
   await assertNoAxeViolations(page);
 });
 

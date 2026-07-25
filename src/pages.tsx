@@ -379,57 +379,130 @@ export const GalleryCanvas: FC<GalleryCanvasProps> = ({
         </dl>
       </section>
 
-      <section
-        class={styles.galleryGrid}
-        aria-label={editor ? "Nankotsuギャラリー編集キャンバス" : "Nankotsuギャラリー"}
-        data-gallery-grid
+      <div
+        class={styles.gallerySections}
+        data-gallery-canvas
         data-primary-content
       >
-        {manifest.items.map((item, index) => (
-          <figure
-            class={`${styles.galleryItem} ${galleryLayoutClass(item)} ${editor ? styles.galleryEditable : ""}`}
-            data-gallery-id={item.id}
-            data-layout={item.layout}
-          >
-            <button
-              class={`${styles.galleryButton} ${editor ? styles.galleryEditorButton : ""}`}
-              type="button"
-              aria-label={editor ? `${item.title}を編集` : `${item.title}を拡大`}
-              aria-pressed={editor ? "false" : undefined}
-              draggable={editor}
-              data-gallery-open={editor ? undefined : ""}
-              data-gallery-select={editor ? "" : undefined}
-              data-gallery-src={gallerySource(item, 1920, "webp", editor)}
-              data-gallery-alt={item.alt}
-              data-gallery-title={item.title}
-              data-gallery-date={item.date ?? ""}
-              data-gallery-width={String(item.width)}
-              data-gallery-height={String(item.height)}
+        {manifest.sections.map((section, sectionIndex) => {
+          const sectionItems = manifest.items.filter(
+            (item) => item.sectionId === section.id,
+          );
+
+          return (
+            <section
+              class={styles.gallerySection}
+              data-gallery-section
+              data-section-id={section.id}
             >
-              {editor ? (
-                <span class={styles.galleryOrderBadge} aria-hidden="true">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-              ) : null}
-              <GalleryPicture
-                item={item}
-                priority={index === 0}
-                admin={editor}
-              />
-            </button>
-            <figcaption>
-              <span data-gallery-caption-title>{item.title}</span>
-              {item.date ? (
-                <time datetime={item.date} data-gallery-caption-date>
-                  {item.date}
-                </time>
-              ) : (
-                <time hidden data-gallery-caption-date />
-              )}
-            </figcaption>
-          </figure>
-        ))}
-      </section>
+              <header class={styles.gallerySectionHeader}>
+                <div>
+                  <p class={styles.gallerySectionNumber} data-section-number>
+                    Section {String(sectionIndex + 1).padStart(2, "0")}
+                  </p>
+                  <h2 data-section-title>{section.title}</h2>
+                  <p data-section-description hidden={!section.description}>
+                    {section.description}
+                  </p>
+                </div>
+                <div class={styles.gallerySectionMeta}>
+                  <span data-section-count>
+                    {String(sectionItems.length).padStart(2, "0")} works
+                  </span>
+                  {editor ? (
+                    <>
+                      <button
+                        class={styles.gallerySectionEditButton}
+                        type="button"
+                        aria-label={`${section.title}セクションを編集`}
+                        aria-pressed="false"
+                        data-section-select
+                      >
+                        編集
+                      </button>
+                      <button
+                        class={styles.gallerySectionEditButton}
+                        type="button"
+                        aria-label={`${section.title}セクションをドラッグして並べ替え`}
+                        draggable
+                        data-section-drag
+                      >
+                        Drag
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </header>
+              <div
+                class={styles.galleryGrid}
+                aria-label={
+                  editor
+                    ? `${section.title}セクションの写真編集`
+                    : `${section.title}セクション`
+                }
+                data-gallery-grid
+                data-section-grid
+                data-section-id={section.id}
+              >
+                {sectionItems.map((item) => {
+                  const index = manifest.items.findIndex(
+                    (candidate) => candidate.id === item.id,
+                  );
+                  return (
+                    <figure
+                      class={`${styles.galleryItem} ${galleryLayoutClass(item)} ${editor ? styles.galleryEditable : ""}`}
+                      data-gallery-id={item.id}
+                      data-layout={item.layout}
+                    >
+                      <button
+                        class={`${styles.galleryButton} ${editor ? styles.galleryEditorButton : ""}`}
+                        type="button"
+                        aria-label={editor ? `${item.title}を編集` : `${item.title}を拡大`}
+                        aria-pressed={editor ? "false" : undefined}
+                        draggable={editor}
+                        data-gallery-open={editor ? undefined : ""}
+                        data-gallery-select={editor ? "" : undefined}
+                        data-gallery-src={gallerySource(item, 1920, "webp", editor)}
+                        data-gallery-alt={item.alt}
+                        data-gallery-title={item.title}
+                        data-gallery-date={item.date ?? ""}
+                        data-gallery-width={String(item.width)}
+                        data-gallery-height={String(item.height)}
+                      >
+                        {editor ? (
+                          <span class={styles.galleryOrderBadge} aria-hidden="true">
+                            {String(index + 1).padStart(2, "0")}
+                          </span>
+                        ) : null}
+                        <GalleryPicture
+                          item={item}
+                          priority={index === 0}
+                          admin={editor}
+                        />
+                      </button>
+                      <figcaption>
+                        <span data-gallery-caption-title>{item.title}</span>
+                        {item.date ? (
+                          <time datetime={item.date} data-gallery-caption-date>
+                            {item.date}
+                          </time>
+                        ) : (
+                          <time hidden data-gallery-caption-date />
+                        )}
+                      </figcaption>
+                    </figure>
+                  );
+                })}
+                {editor && sectionItems.length === 0 ? (
+                  <p class={styles.gallerySectionEmpty} data-section-empty>
+                    写真をここへドラッグ
+                  </p>
+                ) : null}
+              </div>
+            </section>
+          );
+        })}
+      </div>
 
       <dialog
         class={styles.lightboxDialog}
@@ -512,6 +585,13 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
           <button
             class={styles.adminButton}
             type="button"
+            data-section-add
+          >
+            セクション追加
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
             data-gallery-undo
             disabled
           >
@@ -567,7 +647,7 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
       data-gallery-inspector
       data-open="false"
       aria-hidden="true"
-      aria-label="写真の編集"
+      aria-label="写真・セクションの編集"
     >
       <header class={styles.adminInspectorHeader}>
         <div>
@@ -582,7 +662,7 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
           閉じる
         </button>
       </header>
-      <div class={styles.adminInspectorBody}>
+      <div class={styles.adminInspectorBody} data-inspector-photo>
         <label class={styles.adminField}>
           タイトル
           <input
@@ -611,6 +691,10 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
             <option value="wide">横長</option>
             <option value="feature">大きく見せる</option>
           </select>
+        </label>
+        <label class={styles.adminField}>
+          セクション
+          <select data-inspector-input="sectionId" data-item-section-select />
         </label>
         <div class={styles.adminFieldRow}>
           <label class={styles.adminField}>
@@ -655,6 +739,54 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
             data-gallery-remove
           >
             下書きから外す
+          </button>
+          <a class={styles.adminButton} href="/gallery/" target="_blank">
+            公開ページ
+          </a>
+        </div>
+      </div>
+      <div class={styles.adminInspectorBody} data-inspector-section hidden>
+        <label class={styles.adminField}>
+          セクション名
+          <input
+            type="text"
+            maxLength={120}
+            autoComplete="off"
+            data-section-input="title"
+          />
+        </label>
+        <label class={styles.adminField}>
+          セクション説明
+          <textarea
+            maxLength={300}
+            rows={4}
+            data-section-input="description"
+          />
+        </label>
+        <p class={styles.adminInspectorHint}>
+          写真はドラッグして、このセクション内または別のセクションへ移動できます。
+        </p>
+        <div class={styles.adminInspectorActions}>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-section-move="-1"
+          >
+            セクションを前へ
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-section-move="1"
+          >
+            セクションを後へ
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-section-focus-import
+          >
+            ここへ写真を追加
           </button>
           <a class={styles.adminButton} href="/gallery/" target="_blank">
             公開ページ

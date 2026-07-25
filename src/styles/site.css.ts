@@ -1209,25 +1209,148 @@ globalStyle(`${galleryFacts} dd`, {
   fontVariantNumeric: "tabular-nums",
 });
 
-export const galleryGrid = style({
+export const gallerySections = style({
   ...sectionPad,
   display: "grid",
   width: "100%",
   maxWidth: vars.size.content,
   marginInline: "auto",
   paddingBlock: `${vars.space[4]} ${vars.space[16]}`,
+  gap: vars.space[16],
+});
+
+export const gallerySection = style({
+  position: "relative",
+  display: "grid",
+  minWidth: 0,
+  gap: vars.space[5],
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
+  selectors: {
+    "&[data-dragging='true']": {
+      zIndex: 3,
+      opacity: 0.55,
+    },
+    "&[data-section-drop='before']::before": {
+      position: "absolute",
+      insetBlockStart: `calc(${vars.space[3]} * -1)`,
+      insetInline: 0,
+      height: vars.space[1],
+      background: vars.color.cobalt,
+      content: "",
+    },
+    "&[data-section-drop='after']::after": {
+      position: "absolute",
+      insetBlockEnd: `calc(${vars.space[3]} * -1)`,
+      insetInline: 0,
+      height: vars.space[1],
+      background: vars.color.cobalt,
+      content: "",
+    },
+  },
+});
+
+export const gallerySectionHeader = style({
+  display: "flex",
+  minWidth: 0,
+  paddingBlockStart: vars.space[4],
+  alignItems: "end",
+  justifyContent: "space-between",
+  gap: vars.space[5],
+  borderTop: `${vars.size.hairline} solid ${vars.color.graphite}`,
+  "@media": {
+    "screen and (max-width: 39.99rem)": {
+      display: "grid",
+      alignItems: "start",
+    },
+  },
+});
+
+globalStyle(`${gallerySectionHeader} > div:first-child`, {
+  display: "grid",
+  minWidth: 0,
+  gap: vars.space[2],
+});
+
+globalStyle(`${gallerySectionHeader} h2`, {
+  fontSize: "clamp(1.4rem, 4vw, 2.5rem)",
+  letterSpacing: "-0.035em",
+});
+
+globalStyle(`${gallerySectionHeader} [data-section-description]`, {
+  maxWidth: "62ch",
+  color: vars.color.graphiteSoft,
+});
+
+export const gallerySectionNumber = style({
+  color: vars.color.cobaltDark,
+  fontFamily: vars.font.mono,
+  fontSize: "0.66rem",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+});
+
+export const gallerySectionMeta = style({
+  display: "flex",
+  flex: "0 0 auto",
+  alignItems: "center",
+  gap: vars.space[3],
+  color: vars.color.graphiteSoft,
+  fontFamily: vars.font.mono,
+  fontSize: "0.66rem",
+});
+
+export const gallerySectionEditButton = style({
+  ...controlReset,
+  paddingInline: vars.space[3],
+  background: vars.color.paperRaised,
+  color: vars.color.graphite,
+  fontFamily: vars.font.body,
+  fontSize: "0.7rem",
+  selectors: {
+    "&[data-section-drag]": {
+      cursor: "grab",
+    },
+    "&[data-section-drag]:active": {
+      cursor: "grabbing",
+    },
+    "&[aria-pressed='true']": {
+      borderColor: vars.color.cobalt,
+      boxShadow: `0 0 0 ${vars.size.focusRing} ${vars.color.cobalt}`,
+    },
+  },
+});
+
+export const galleryGrid = style({
+  display: "grid",
+  width: "100%",
   gridTemplateColumns: "minmax(0, 1fr)",
   columnGap: vars.space[4],
   rowGap: vars.space[8],
+  transition: `background ${vars.motion.quick} ${vars.motion.easeOut}, box-shadow ${vars.motion.quick} ${vars.motion.easeOut}`,
+  selectors: {
+    "&[data-drop-active='true']": {
+      background: `color-mix(in oklab, ${vars.color.cobaltPale} 32%, ${vars.color.transparent})`,
+      boxShadow: `inset 0 0 0 ${vars.size.focusRing} ${vars.color.cobalt}`,
+    },
+  },
   "@media": {
     "screen and (min-width: 40rem)": {
       gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     },
     "screen and (min-width: 60rem)": {
       gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-      paddingBlockStart: vars.space[6],
     },
   },
+});
+
+export const gallerySectionEmpty = style({
+  display: "grid",
+  minHeight: "10rem",
+  gridColumn: "1 / -1",
+  placeItems: "center",
+  border: `${vars.size.hairline} dashed ${vars.color.graphiteSoft}`,
+  color: vars.color.graphiteSoft,
+  fontSize: "0.76rem",
 });
 
 export const galleryItem = style({
@@ -1516,6 +1639,24 @@ export const galleryEditable = style({
       zIndex: 3,
       opacity: 0.55,
     },
+    "&[data-item-drop='before']::before": {
+      position: "absolute",
+      zIndex: 4,
+      insetBlockStart: `calc(${vars.space[2]} * -1)`,
+      insetInline: 0,
+      height: vars.space[1],
+      background: vars.color.cobalt,
+      content: "",
+    },
+    "&[data-item-drop='after']::after": {
+      position: "absolute",
+      zIndex: 4,
+      insetBlockEnd: `calc(${vars.space[2]} * -1)`,
+      insetInline: 0,
+      height: vars.space[1],
+      background: vars.color.cobalt,
+      content: "",
+    },
   },
 });
 
@@ -1588,7 +1729,7 @@ globalStyle(`${adminInspector}[data-open='true']`, {
 });
 
 globalStyle(
-  `[data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryMasthead}, [data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryGrid}`,
+  `[data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryMasthead}, [data-gallery-admin]:has(${adminInspector}[data-open='true']) ${gallerySections}`,
   {
     "@media": {
       "screen and (min-width: 64rem)": {
@@ -1601,13 +1742,21 @@ globalStyle(
 );
 
 globalStyle(
-  `[data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryGrid}`,
+  `[data-gallery-admin]:has(${adminInspector}[data-open='true']) ${gallerySections}`,
   {
     paddingBlockEnd: `calc(52dvh + ${vars.space[16]})`,
     "@media": {
       "screen and (min-width: 64rem)": {
         paddingBlockEnd: vars.space[16],
       },
+    },
+  },
+);
+
+globalStyle(
+  `[data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryGrid}`,
+  {
+    "@media": {
       "screen and (min-width: 64rem) and (max-width: 87.99rem)": {
         gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
       },
@@ -1702,6 +1851,11 @@ export const adminInspectorActions = style({
   borderTop: `${vars.size.hairline} solid ${vars.color.line}`,
 });
 
+export const adminInspectorHint = style({
+  color: vars.color.graphiteSoft,
+  fontSize: "0.72rem",
+});
+
 globalStyle(`[data-gallery-admin][data-preview='true'] ${galleryOrderBadge}`, {
   opacity: 0,
 });
@@ -1709,6 +1863,13 @@ globalStyle(`[data-gallery-admin][data-preview='true'] ${galleryOrderBadge}`, {
 globalStyle(`[data-gallery-admin][data-preview='true'] ${galleryEditorButton}`, {
   cursor: "zoom-in",
 });
+
+globalStyle(
+  `[data-gallery-admin][data-preview='true'] ${gallerySectionEditButton}, [data-gallery-admin][data-preview='true'] ${gallerySectionEmpty}`,
+  {
+    display: "none",
+  },
+);
 
 export const adminToast = style({
   position: "fixed",

@@ -1,7 +1,6 @@
 import {
   type GalleryDraftUpdate,
   type GalleryManifest,
-  galleryManifestSchema,
   galleryPublishRequestSchema,
   parseGalleryManifest,
   seedGalleryManifest,
@@ -110,7 +109,7 @@ async function loadMutation(
   if (!("manifest" in value)) {
     throw new TypeError("Gallery mutation receipt has no manifest.");
   }
-  return galleryManifestSchema.parse(value.manifest);
+  return parseGalleryManifest(value.manifest);
 }
 
 async function requestHash(value: unknown): Promise<string> {
@@ -240,6 +239,7 @@ export async function saveDraftManifest(
 ): Promise<GalleryManifest> {
   const hash = await requestHash({
     baseVersion: update.baseVersion,
+    sections: update.sections,
     items: update.items,
   });
   const replay = await loadMutation(
@@ -268,7 +268,7 @@ export async function saveDraftManifest(
   }
 
   const next = parseGalleryManifest({
-    schemaVersion: 1,
+    schemaVersion: 2,
     version: current.state.draft.version + 1,
     updatedAt: new Date().toISOString(),
     lastMutation: {
@@ -276,6 +276,7 @@ export async function saveDraftManifest(
       channel: "draft",
       requestHash: hash,
     },
+    sections: update.sections,
     items: update.items,
   });
 

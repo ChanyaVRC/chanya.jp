@@ -23,12 +23,24 @@ const MUTATION_IDS = {
   publish: "00000000-0000-4000-8000-000000000003",
   reused: "00000000-0000-4000-8000-000000000004",
   conflict: "00000000-0000-4000-8000-000000000005",
+  migration: "00000000-0000-4000-8000-000000000006",
 } as const;
 
 interface GalleryState {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 1 | 2;
   readonly draft: GalleryManifest;
   readonly published: GalleryManifest;
+}
+
+interface LegacyGalleryManifest {
+  readonly schemaVersion: 1;
+  readonly version: number;
+  readonly updatedAt: string;
+  readonly lastMutation: GalleryManifest["lastMutation"];
+  readonly items: readonly Omit<
+    GalleryManifest["items"][number],
+    "sectionId"
+  >[];
 }
 
 interface StoredValue {
@@ -258,8 +270,47 @@ function manifest(version: number, title: string): GalleryManifest {
   });
 }
 
-function itemsWithTitle(title: string): GalleryManifest["items"] {
-  return manifest(1, title).items;
+function contentWithTitle(
+  title: string,
+): Pick<GalleryManifest, "sections" | "items"> {
+  const value = manifest(1, title);
+  return {
+    sections: value.sections,
+    items: value.items,
+  };
+}
+
+function contentWithSectionTitle(
+  title: string,
+): Pick<GalleryManifest, "sections" | "items"> {
+  const seed = seedGalleryManifest();
+  return {
+    sections: seed.sections.map((section, index) =>
+      index === 0 ? { ...section, title } : section,
+    ),
+    items: seed.items,
+  };
+}
+
+function legacyManifest(version: number, title: string): LegacyGalleryManifest {
+  const current = manifest(version, title);
+  return {
+    schemaVersion: 1,
+    version: current.version,
+    updatedAt: current.updatedAt,
+    lastMutation: current.lastMutation,
+    items: current.items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      date: item.date,
+      alt: item.alt,
+      width: item.width,
+      height: item.height,
+      layout: item.layout,
+      focalPoint: item.focalPoint,
+      source: item.source,
+    })),
+  };
 }
 
 describe("gallery R2 store", () => {
@@ -274,16 +325,60 @@ describe("gallery R2 store", () => {
 
   it("legacy publishedだけがあればdraftも同じmanifestへfallbackする", async () => {
     const bucket = new MemoryR2Bucket();
-    const legacyPublished = manifest(7, "Legacy published");
+    const expected = manifest(7, "Legacy published");
+    const legacyPublished = legacyManifest(7, "Legacy published");
     bucket.seedJson(LEGACY_PUBLISHED_KEY, legacyPublished);
 
     await expect(loadPublishedManifest(bucket)).resolves.toEqual(
-      legacyPublished,
+      expected,
     );
     await expect(loadDraftManifest(bucket)).resolves.toEqual(
-      legacyPublished,
+      expected,
     );
     expect(bucket.has(LEGACY_DRAFT_KEY)).toBe(false);
+  });
+
+  it("v1 stateを読込時にv2へ移行し、次回CAS保存で遅延永続化する", async () => {
+    const bucket = new MemoryR2Bucket();
+    const legacy = legacyManifest(7, "Legacy state");
+    bucket.seedJson(STATE_KEY, {
+      schemaVersion: 1,
+      draft: legacy,
+      published: legacy,
+    });
+
+    const migrated = await loadDraftManifest(bucket);
+
+    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.version).toBe(7);
+    expect(migrated.items).toHaveLength(1);
+    expect(migrated.items[0]?.sectionId).toBe(migrated.sections[0]?.id);
+    expect(
+      bucket.readJson<{ draft: { schemaVersion: number } }>(STATE_KEY).draft
+        .schemaVersion,
+    ).toBe(1);
+    expect(bucket.statePutConditions).toEqual([]);
+
+    const saved = await saveDraftManifest(bucket, {
+      baseVersion: migrated.version,
+      mutationId: MUTATION_IDS.migration,
+      sections: migrated.sections,
+      items: migrated.items.map((item, index) =>
+        index === 0 ? { ...item, title: "Migrated draft" } : item,
+      ),
+    });
+    const persisted = bucket.readJson<GalleryState>(STATE_KEY);
+
+    expect(saved.version).toBe(8);
+    expect(persisted.draft.schemaVersion).toBe(2);
+    expect(persisted.published.schemaVersion).toBe(2);
+    expect(persisted.draft.items[0]?.title).toBe("Migrated draft");
+    expect(bucket.statePutConditions).toEqual([
+      {
+        etagMatches: "etag-1",
+        etagDoesNotMatch: undefined,
+      },
+    ]);
   });
 
   it("draft保存はversionを進め、state作成と更新をetag CASする", async () => {
@@ -292,12 +387,12 @@ describe("gallery R2 store", () => {
     const first = await saveDraftManifest(bucket, {
       baseVersion: 1,
       mutationId: MUTATION_IDS.firstDraft,
-      items: itemsWithTitle("First draft"),
+      ...contentWithTitle("First draft"),
     });
     const second = await saveDraftManifest(bucket, {
       baseVersion: first.version,
       mutationId: MUTATION_IDS.secondDraft,
-      items: itemsWithTitle("Second draft"),
+      ...contentWithTitle("Second draft"),
     });
     const state = bucket.readJson<GalleryState>(STATE_KEY);
 
@@ -322,7 +417,7 @@ describe("gallery R2 store", () => {
     const draft = await saveDraftManifest(bucket, {
       baseVersion: 1,
       mutationId: MUTATION_IDS.firstDraft,
-      items: itemsWithTitle("Ready to publish"),
+      ...contentWithTitle("Ready to publish"),
     });
 
     const published = await publishDraftManifest(bucket, {
@@ -333,6 +428,7 @@ describe("gallery R2 store", () => {
 
     expect(state.draft).toEqual(draft);
     expect(state.published).toEqual(published);
+    expect(state.published.sections).toEqual(state.draft.sections);
     expect(state.published.items).toEqual(state.draft.items);
     expect(state.published.version).toBe(state.draft.version);
     expect(state.draft.lastMutation?.channel).toBe("draft");
@@ -341,20 +437,20 @@ describe("gallery R2 store", () => {
     expect(bucket.has(LEGACY_PUBLISHED_KEY)).toBe(false);
   });
 
-  it("同じmutation idを異なるrequest hashで再利用すると拒否する", async () => {
+  it("同じmutation idでsection内容を変えるとrequest hash差分として拒否する", async () => {
     const bucket = new MemoryR2Bucket();
 
     await saveDraftManifest(bucket, {
       baseVersion: 1,
       mutationId: MUTATION_IDS.reused,
-      items: itemsWithTitle("Original mutation"),
+      ...contentWithSectionTitle("Original section"),
     });
 
     await expect(
       saveDraftManifest(bucket, {
         baseVersion: 1,
         mutationId: MUTATION_IDS.reused,
-        items: itemsWithTitle("Reused mutation"),
+        ...contentWithSectionTitle("Reused section"),
       }),
     ).rejects.toBeInstanceOf(GalleryMutationReuseError);
   });
@@ -364,7 +460,7 @@ describe("gallery R2 store", () => {
     const currentDraft = await saveDraftManifest(bucket, {
       baseVersion: 1,
       mutationId: MUTATION_IDS.firstDraft,
-      items: itemsWithTitle("Current draft"),
+      ...contentWithTitle("Current draft"),
     });
     const currentState = bucket.readJson<GalleryState>(STATE_KEY);
     const competingDraft = manifest(3, "Competing draft");
@@ -376,7 +472,7 @@ describe("gallery R2 store", () => {
     const saving = saveDraftManifest(bucket, {
       baseVersion: currentDraft.version,
       mutationId: MUTATION_IDS.conflict,
-      items: itemsWithTitle("Losing draft"),
+      ...contentWithTitle("Losing draft"),
     });
 
     await expect(saving).rejects.toBeInstanceOf(

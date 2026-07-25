@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import {
+  defaultGallerySectionId,
   galleryDraftUpdateSchema,
   galleryManifestSchema,
+  parseGalleryManifest,
   seedGalleryManifest,
 } from "../src/gallery/manifest";
 
@@ -10,7 +12,20 @@ describe("gallery manifest", () => {
   it("既存42枚を検証済みのvisual-first manifestへ変換する", () => {
     const manifest = seedGalleryManifest();
 
+    expect(manifest.schemaVersion).toBe(2);
+    expect(manifest.sections).toEqual([
+      {
+        id: defaultGallerySectionId,
+        title: "Nankotsu",
+        description: "VRChatで撮影した時間と場所の記録。",
+      },
+    ]);
     expect(manifest.items).toHaveLength(42);
+    expect(
+      manifest.items.every(
+        (item) => item.sectionId === defaultGallerySectionId,
+      ),
+    ).toBe(true);
     expect(galleryManifestSchema.parse(manifest)).toEqual(manifest);
     expect(
       manifest.items.filter((item) => item.layout === "feature").length,
@@ -20,35 +35,141 @@ describe("gallery manifest", () => {
     ).toBeGreaterThanOrEqual(5);
   });
 
-  it("重複IDと範囲外の焦点位置を拒否する", () => {
+  it("schema version 1を既定セクション付きのversion 2へ移行する", () => {
+    const current = seedGalleryManifest();
+    const lastMutation = {
+      id: "00000000-0000-4000-8000-000000000007",
+      channel: "draft" as const,
+      requestHash: "a".repeat(64),
+    };
+    const legacyItems = current.items.map((item) => {
+      const { sectionId: _sectionId, ...legacyItem } = item;
+      return legacyItem;
+    });
+
+    const migrated = parseGalleryManifest({
+      schemaVersion: 1,
+      version: 7,
+      updatedAt: "2026-07-25T00:00:00.000Z",
+      lastMutation,
+      items: legacyItems,
+    });
+
+    expect(migrated).toMatchObject({
+      schemaVersion: 2,
+      version: 7,
+      updatedAt: "2026-07-25T00:00:00.000Z",
+      lastMutation,
+      sections: [
+        {
+          id: defaultGallerySectionId,
+          title: "Nankotsu",
+        },
+      ],
+    });
+    expect(migrated.items.map((item) => item.id)).toEqual(
+      legacyItems.map((item) => item.id),
+    );
+    expect(
+      migrated.items.every(
+        (item) => item.sectionId === defaultGallerySectionId,
+      ),
+    ).toBe(true);
+  });
+
+  it("重複ID・不明なセクション・範囲外の焦点位置を拒否する", () => {
     const manifest = seedGalleryManifest();
-    const duplicate = {
+    const duplicateItem = {
       ...manifest,
       items: [
         manifest.items[0],
+        {
+          ...manifest.items[1],
+          id: manifest.items[0]!.id,
+        },
+      ],
+    };
+    const invalidFocalPoint = {
+      ...manifest,
+      items: [
         {
           ...manifest.items[0],
           focalPoint: { x: 1.1, y: 0.5 },
         },
       ],
     };
+    const duplicateSection = {
+      ...manifest,
+      sections: [manifest.sections[0], manifest.sections[0]],
+    };
+    const unknownSection = {
+      ...manifest,
+      items: [
+        {
+          ...manifest.items[0],
+          sectionId: "00000000-0000-4000-8000-000000000099",
+        },
+      ],
+    };
 
-    expect(galleryManifestSchema.safeParse(duplicate).success).toBe(false);
+    expect(galleryManifestSchema.safeParse(duplicateItem).success).toBe(false);
+    expect(galleryManifestSchema.safeParse(invalidFocalPoint).success).toBe(
+      false,
+    );
+    expect(galleryManifestSchema.safeParse(duplicateSection).success).toBe(
+      false,
+    );
+    expect(galleryManifestSchema.safeParse(unknownSection).success).toBe(
+      false,
+    );
   });
 
-  it("下書き更新にbaseVersionとmutationIdを要求する", () => {
+  it("section順にitemsを正規化し、各section内の写真順を保つ", () => {
+    const manifest = seedGalleryManifest();
+    const secondSectionId = "00000000-0000-4000-8000-000000000002";
+    const first = manifest.items[0]!;
+    const second = manifest.items[1]!;
+    const third = manifest.items[2]!;
+
+    const parsed = galleryManifestSchema.parse({
+      ...manifest,
+      sections: [
+        manifest.sections[0],
+        {
+          id: secondSectionId,
+          title: "Second",
+          description: "",
+        },
+      ],
+      items: [
+        first,
+        { ...second, sectionId: secondSectionId },
+        third,
+      ],
+    });
+
+    expect(parsed.items.map((item) => item.id)).toEqual([
+      first.id,
+      third.id,
+      second.id,
+    ]);
+  });
+
+  it("下書き更新にbaseVersion・mutationId・sectionsを要求する", () => {
     const manifest = seedGalleryManifest();
 
+    const parsed = galleryDraftUpdateSchema.safeParse({
+      baseVersion: manifest.version,
+      mutationId: crypto.randomUUID(),
+      sections: manifest.sections,
+      items: manifest.items,
+    });
+
+    expect(parsed.success).toBe(true);
     expect(
       galleryDraftUpdateSchema.safeParse({
         baseVersion: manifest.version,
         mutationId: crypto.randomUUID(),
-        items: manifest.items,
-      }).success,
-    ).toBe(true);
-    expect(
-      galleryDraftUpdateSchema.safeParse({
-        baseVersion: manifest.version,
         items: manifest.items,
       }).success,
     ).toBe(false);
@@ -73,6 +194,12 @@ describe("gallery admin boundary", () => {
     expect(body).toContain('href="/cdn-cgi/access/logout"');
     expect(body).toContain('data-gallery-admin');
     expect(body).toContain('data-gallery-bootstrap');
+    expect(body).toContain('data-gallery-canvas');
+    expect(body).toContain('data-gallery-section');
+    expect(body).toContain(`data-section-id="${defaultGallerySectionId}"`);
+    expect(body).toContain('data-section-select');
+    expect(body).toContain('data-section-add');
+    expect(body).toContain('data-inspector-section');
     expect(body.match(/data-gallery-select/g)).toHaveLength(42);
     expect(body).toContain("/src/admin-client.ts");
   });
@@ -94,6 +221,7 @@ describe("gallery admin boundary", () => {
         body: JSON.stringify({
           baseVersion: 1,
           mutationId: crypto.randomUUID(),
+          sections: seedGalleryManifest().sections,
           items: seedGalleryManifest().items,
         }),
       },
@@ -123,12 +251,77 @@ describe("gallery admin boundary", () => {
         body: JSON.stringify({
           baseVersion: 1,
           mutationId: crypto.randomUUID(),
+          sections: seedGalleryManifest().sections,
           items: seedGalleryManifest().items,
         }),
       },
     );
 
     expect(response.status).toBe(503);
+  });
+
+  it("公開Galleryをsection順と所属写真順で描画する", async () => {
+    const seed = seedGalleryManifest();
+    const secondSectionId = "00000000-0000-4000-8000-000000000021";
+    const emptySectionId = "00000000-0000-4000-8000-000000000022";
+    const published = galleryManifestSchema.parse({
+      ...seed,
+      sections: [
+        {
+          id: secondSectionId,
+          title: "Night Sessions",
+          description: "夜の記録。",
+        },
+        seed.sections[0],
+        {
+          id: emptySectionId,
+          title: "Next Session",
+          description: "",
+        },
+      ],
+      items: [
+        seed.items[0],
+        { ...seed.items[1], sectionId: secondSectionId },
+        seed.items[2],
+      ],
+    });
+    const get = vi.fn(async () => ({
+      etag: "state-etag",
+      json: async () => ({
+        schemaVersion: 1,
+        draft: published,
+        published,
+      }),
+    }));
+    const env = {
+      GALLERY_BUCKET: { get } as unknown as R2Bucket,
+    } as CloudflareBindings;
+
+    const response = await app.request(
+      "http://localhost/gallery/",
+      undefined,
+      env,
+    );
+    const body = await response.text();
+    const secondStart = body.indexOf(`data-section-id="${secondSectionId}"`);
+    const defaultStart = body.indexOf(
+      `data-section-id="${defaultGallerySectionId}"`,
+    );
+    const emptyStart = body.indexOf(`data-section-id="${emptySectionId}"`);
+    const secondBlock = body.slice(secondStart, defaultStart);
+    const defaultBlock = body.slice(defaultStart, emptyStart);
+    const emptyBlock = body.slice(emptyStart);
+
+    expect(response.status).toBe(200);
+    expect(secondStart).toBeGreaterThan(-1);
+    expect(defaultStart).toBeGreaterThan(secondStart);
+    expect(emptyStart).toBeGreaterThan(defaultStart);
+    expect(secondBlock).toContain('data-gallery-id="nankotsu-02"');
+    expect(secondBlock).not.toContain('data-gallery-id="nankotsu-01"');
+    expect(defaultBlock).toContain('data-gallery-id="nankotsu-01"');
+    expect(defaultBlock).toContain('data-gallery-id="nankotsu-03"');
+    expect(emptyBlock).toContain("Next Session");
+    expect(emptyBlock).not.toContain("data-gallery-id=");
   });
 
   it("公開manifestにないmanaged画像を公開URLから取得しない", async () => {
