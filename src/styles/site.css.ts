@@ -572,17 +572,19 @@ export const heroSplit = style({
   display: "grid",
   width: "100%",
   maxWidth: vars.size.content,
-  minHeight: "calc(100svh - 4.5rem)",
   marginInline: "auto",
   paddingBlockStart: vars.space[12],
-  paddingBlockEnd: vars.space[20],
-  gap: vars.space[12],
-  alignItems: "center",
+  paddingBlockEnd: vars.space[16],
+  gap: vars.space[8],
+  alignItems: "start",
   "@media": {
     "screen and (min-width: 48rem)": {
       gridTemplateColumns: "minmax(0, 1.05fr) minmax(20rem, 0.95fr)",
+      minHeight: "calc(100svh - 4.5rem)",
       paddingBlockStart: vars.space[16],
       paddingBlockEnd: vars.space[24],
+      gap: vars.space[12],
+      alignItems: "center",
     },
   },
 });
@@ -667,14 +669,12 @@ export const secondaryButton = style({
 export const heroProof = style({
   position: "relative",
   display: "grid",
-  gridTemplateColumns: "minmax(0, 5fr) minmax(0, 2fr)",
-  alignItems: "end",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: vars.space[4],
   minWidth: 0,
-  paddingInlineEnd: vars.space[3],
   "@media": {
-    "screen and (max-width: 23.5rem)": {
-      gridTemplateColumns: "minmax(0, 1fr)",
-      paddingInlineEnd: 0,
+    "screen and (min-width: 48rem)": {
+      display: "block",
     },
   },
 });
@@ -711,20 +711,18 @@ globalStyle(`${profileFigure} figcaption span`, {
 export const codeFigure = style({
   position: "relative",
   zIndex: 1,
-  width: "clamp(12rem, 38vw, 22rem)",
+  width: "100%",
   minWidth: 0,
-  maxWidth: "100%",
-  marginInlineStart: "-90%",
-  marginBlockEnd: vars.space[5],
   padding: vars.space[4],
   border: `${vars.size.hairline} solid ${vars.color.graphite}`,
   background: vars.color.paperRaised,
   boxShadow: vars.shadow.raised,
   "@media": {
-    "screen and (max-width: 23.5rem)": {
-      width: `calc(100% - ${vars.space[8]})`,
-      marginBlockStart: `calc(0px - ${vars.space[16]})`,
-      marginInlineStart: vars.space[8],
+    "screen and (min-width: 48rem)": {
+      position: "absolute",
+      insetInlineStart: 0,
+      insetBlockEnd: vars.space[8],
+      width: "min(22rem, 78%)",
     },
   },
 });
@@ -738,13 +736,28 @@ globalStyle(`${codeFigure} figcaption`, {
 
 globalStyle(`${codeFigure} pre`, {
   overflowX: "auto",
-  fontSize: "clamp(0.58rem, 1.6vw, 0.78rem)",
-  lineHeight: 1.7,
+  fontSize: "clamp(0.7rem, 1.2vw, 0.82rem)",
+  lineHeight: 1.65,
+  tabSize: 2,
 });
 
-globalStyle(`${codeFigure} [data-type-line]`, {
+globalStyle(`${codeFigure} [data-syntax="keyword"]`, {
   color: vars.color.cobaltDark,
   fontWeight: vars.weight.bold,
+});
+
+globalStyle(`${codeFigure} [data-syntax="type"]`, {
+  color: vars.color.graphite,
+  fontWeight: vars.weight.semibold,
+});
+
+globalStyle(`${codeFigure} [data-syntax="property"]`, {
+  color: vars.color.graphiteSoft,
+  fontWeight: vars.weight.medium,
+});
+
+globalStyle(`${codeFigure} [data-syntax="string"]`, {
+  color: vars.color.cobaltDark,
 });
 
 export const darkBand = style({
