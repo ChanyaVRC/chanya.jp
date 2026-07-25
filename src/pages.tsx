@@ -27,28 +27,29 @@ const ProfilePicture: FC<{ readonly priority?: boolean }> = ({ priority }) => (
   </picture>
 );
 
-const ProjectCard: FC<{
+const ProjectRecord: FC<{
   readonly project: Project;
-  readonly featured?: boolean;
-}> = ({ project, featured }) => (
-  <article
-    class={`${styles.projectCard} ${featured ? styles.projectCardFeatured : ""}`}
-  >
-    <p class={styles.meta}>{project.kind}</p>
-    <h2>{project.title}</h2>
-    <p>{project.description}</p>
-    <ul class={styles.tagList} aria-label={`${project.title}の技術`}>
-      {project.stack.map((item) => (
-        <li>{item}</li>
-      ))}
-    </ul>
-    <a
-      class={styles.textLink}
-      href={project.href}
-      {...(project.external ? externalAttributes : {})}
-    >
-      {project.action} <Arrow />
-    </a>
+}> = ({ project }) => (
+  <article class={styles.projectRecord}>
+    <div class={styles.projectIdentity}>
+      <p class={styles.meta}>{project.kind}</p>
+      <h2>{project.title}</h2>
+    </div>
+    <p class={styles.projectDescription}>{project.description}</p>
+    <div class={styles.projectDestination}>
+      <ul class={styles.tagList} aria-label={`${project.title}の技術`}>
+        {project.stack.map((item) => (
+          <li>{item}</li>
+        ))}
+      </ul>
+      <a
+        class={styles.textLink}
+        href={project.href}
+        {...(project.external ? externalAttributes : {})}
+      >
+        {project.action} <Arrow />
+      </a>
+    </div>
   </article>
 );
 
@@ -180,67 +181,78 @@ avatar.Parameters["Wave"] = true;`}</code>
 );
 
 export const AboutPage: FC = () => (
-  <>
-    <section class={styles.pageIntro}>
+  <section class={styles.aboutProfile} data-page-layout="about">
+    <figure class={styles.aboutPortrait} data-primary-content>
+      <ProfilePicture />
+      <figcaption>Chanya Kushima · Japan</figcaption>
+    </figure>
+
+    <div class={styles.aboutLead}>
       <div>
         <p class={styles.meta}>About</p>
         <h1>九島茶にゃ。</h1>
       </div>
-      <p>
+      <p class={styles.aboutStatement}>
         Chanya Kushima。Japan。ねこ。多分技術者。ねこはかしこいのです。
       </p>
-    </section>
+    </div>
 
-    <section class={styles.aboutSplit}>
-      <figure class={styles.aboutPortrait}>
-        <ProfilePicture />
-      </figure>
-      <div class={styles.profileDetails}>
-        <dl>
-          <div>
-            <dt>Name / ja</dt>
-            <dd>九島茶にゃ</dd>
-          </div>
-          <div>
-            <dt>Name / en</dt>
-            <dd>Chanya Kushima</dd>
-          </div>
-          <div>
-            <dt>Location</dt>
-            <dd>Japan</dd>
-          </div>
-        </dl>
-        <p>
-          このサイトには、公開している開発プロジェクトとVRChatで撮影した記録をまとめています。
-        </p>
-        <div class={styles.actionRow}>
-          <a class={styles.secondaryButton} href="/development/">
-            Development
-          </a>
-          <a class={styles.secondaryButton} href="/gallery/">
-            Gallery
-          </a>
+    <div class={styles.profileDetails}>
+      <dl>
+        <div>
+          <dt>Name / ja</dt>
+          <dd>九島茶にゃ</dd>
         </div>
+        <div>
+          <dt>Name / en</dt>
+          <dd>Chanya Kushima</dd>
+        </div>
+        <div>
+          <dt>Location</dt>
+          <dd>Japan</dd>
+        </div>
+      </dl>
+      <p>
+        このサイトには、公開している開発プロジェクトとVRChatで撮影した記録をまとめています。
+      </p>
+      <div class={styles.actionRow}>
+        <a class={styles.secondaryButton} href="/development/">
+          Development
+        </a>
+        <a class={styles.secondaryButton} href="/gallery/">
+          Gallery
+        </a>
       </div>
-    </section>
-  </>
+    </div>
+  </section>
 );
 
 export const DevelopmentPage: FC = () => (
   <>
-    <section class={styles.pageIntro}>
-      <div>
+    <section
+      class={styles.developmentMasthead}
+      data-page-layout="development"
+    >
+      <div class={styles.compactHeading}>
         <p class={styles.meta}>Development</p>
         <h1>作ったもの。</h1>
       </div>
-      <p>
+      <p class={styles.developmentLede}>
         VRChatのOSC、ブラウザ内で完結する道具、このサイト。実装と公開先をまとめています。
+      </p>
+      <p class={styles.projectCount}>
+        <strong>03</strong>
+        <span>published projects</span>
       </p>
     </section>
 
-    <section class={styles.projectGrid} aria-label="開発プロジェクト">
-      {projects.map((project, index) => (
-        <ProjectCard project={project} featured={index === 0} />
+    <section
+      class={styles.projectIndex}
+      aria-label="開発プロジェクト"
+      data-primary-content
+    >
+      {projects.map((project) => (
+        <ProjectRecord project={project} />
       ))}
     </section>
 
@@ -266,17 +278,31 @@ avatar.Parameters["BoolParameterName"] = true;`}</code>
 
 export const GalleryPage: FC = () => (
   <>
-    <section class={styles.pageIntro}>
-      <div>
+    <section class={styles.galleryMasthead} data-page-layout="gallery">
+      <div class={styles.compactHeading}>
         <p class={styles.meta}>Gallery</p>
         <h1>Nankotsu.</h1>
       </div>
-      <p>
+      <p class={styles.galleryLede}>
         VRChatで撮影した42枚。写真を選ぶと大きく表示します。自動では切り替わりません。
       </p>
+      <dl class={styles.galleryFacts}>
+        <div>
+          <dt>Works</dt>
+          <dd>42</dd>
+        </div>
+        <div>
+          <dt>Captured</dt>
+          <dd>2020</dd>
+        </div>
+      </dl>
     </section>
 
-    <section class={styles.galleryGrid} aria-label="Nankotsuギャラリー">
+    <section
+      class={styles.galleryGrid}
+      aria-label="Nankotsuギャラリー"
+      data-primary-content
+    >
       {galleryItems.map((item, index) => (
         <figure class={styles.galleryItem}>
           <button
@@ -332,91 +358,138 @@ export const ContactPage: FC = () => {
   );
 
   return (
-    <>
-      <section class={styles.pageIntro}>
-        <div>
+    <section class={styles.directoryLayout} data-page-layout="contact">
+      <header class={styles.directoryHeader}>
+        <div class={styles.compactHeading}>
           <p class={styles.meta}>Contact</p>
           <h1>話す場所。</h1>
         </div>
         <p>
           仕事の話と、それ以外の話でメールアドレスを分けています。内容に近い方を選んでください。
         </p>
-      </section>
+      </header>
 
-      <section class={styles.contactIndex} aria-label="メールアドレス">
-        <a href="mailto:work@chanya.jp">
-          <span>Work</span>
-          <strong>work@chanya.jp</strong>
-          <span aria-hidden="true">↗</span>
-        </a>
-        <a href="mailto:any@chanya.jp">
-          <span>Other</span>
-          <strong>any@chanya.jp</strong>
-          <span aria-hidden="true">↗</span>
-        </a>
-      </section>
+      <div class={styles.directoryBody} data-primary-content>
+        <section
+          class={styles.directoryGroup}
+          aria-labelledby="contact-email-title"
+        >
+          <h2 id="contact-email-title">Email</h2>
+          <div class={styles.contactIndex} aria-label="メールアドレス">
+            <a href="mailto:work@chanya.jp">
+              <span>Work</span>
+              <strong>work@chanya.jp</strong>
+              <span aria-hidden="true">↗</span>
+            </a>
+            <a href="mailto:any@chanya.jp">
+              <span>Other</span>
+              <strong>any@chanya.jp</strong>
+              <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </section>
 
-      <section class={styles.linkSection} aria-labelledby="contact-social-title">
-        <h2 id="contact-social-title">Social</h2>
-        <ul class={styles.linkIndex}>
-          {contactLinks.map((item) => (
-            <li>
-              <a href={item.href} {...externalAttributes}>
-                <span>
-                  <strong>{item.label}</strong>
-                  <small>{item.description}</small>
-                </span>
-                <Arrow />
-              </a>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </>
+        <section
+          class={styles.directoryGroup}
+          aria-labelledby="contact-social-title"
+        >
+          <h2 id="contact-social-title">Social</h2>
+          <ul class={styles.linkIndex}>
+            {contactLinks.map((item) => (
+              <li>
+                <a href={item.href} {...externalAttributes}>
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>{item.description}</small>
+                  </span>
+                  <Arrow />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </section>
   );
 };
 
+const otherLinkGroups = [
+  { key: "social", label: "Profiles" },
+  { key: "contact", label: "Contact" },
+  { key: "community", label: "Community" },
+  { key: "store", label: "Store" },
+] as const;
+
 export const OtherPage: FC = () => (
-  <>
-    <section class={styles.pageIntro}>
-      <div>
+  <section class={styles.directoryLayout} data-page-layout="other">
+    <header class={styles.directoryHeader}>
+      <div class={styles.compactHeading}>
         <p class={styles.meta}>Other</p>
         <h1>外にあるもの。</h1>
       </div>
       <p>プロフィール、コミュニティ、ストア。Chanya.jpの外側へ続くリンクです。</p>
-    </section>
+    </header>
 
-    <section class={styles.linkSection} aria-label="外部リンク">
-      <ul class={styles.linkIndex}>
-        {externalLinks.map((item) => (
-          <li>
-            <a href={item.href} {...externalAttributes}>
-              <span>
-                <strong>{item.label}</strong>
-                <small>{item.description}</small>
-              </span>
-              <Arrow />
-            </a>
-          </li>
-        ))}
-      </ul>
-    </section>
-  </>
+    <div
+      class={`${styles.directoryBody} ${styles.otherDirectory}`}
+      data-primary-content
+    >
+      {otherLinkGroups.map((group) => {
+        const items = externalLinks.filter((item) => item.group === group.key);
+
+        return (
+          <section
+            class={styles.directoryGroup}
+            aria-labelledby={`other-${group.key}-title`}
+          >
+            <h2 id={`other-${group.key}-title`}>{group.label}</h2>
+            <ul class={styles.linkIndex}>
+              {items.map((item) => (
+                <li>
+                  <a href={item.href} {...externalAttributes}>
+                    <span>
+                      <strong>{item.label}</strong>
+                      <small>{item.description}</small>
+                    </span>
+                    <Arrow />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  </section>
 );
 
 export const RuntimeHtmlPage: FC = () => (
   <>
-    <section class={styles.toolIntro}>
-      <div>
+    <section class={styles.toolMasthead} data-page-layout="runtime-html">
+      <div class={styles.compactHeading}>
         <p class={styles.meta}>RuntimeHtml</p>
         <h1>書く。実行する。外へ出さない。</h1>
       </div>
-      <p>
+      <p class={styles.toolLede}>
         HTML、CSS、JavaScriptをブラウザ内のsandboxで確認します。入力内容は送信も保存もされません。
       </p>
+      <dl class={styles.toolFacts}>
+        <div>
+          <dt>Execution</dt>
+          <dd>Browser sandbox</dd>
+        </div>
+        <div>
+          <dt>Storage</dt>
+          <dd>None</dd>
+        </div>
+      </dl>
     </section>
 
-    <section class={styles.runtimeGrid} aria-label="RuntimeHtmlエディター">
+    <section
+      class={styles.runtimeGrid}
+      aria-label="RuntimeHtmlエディター"
+      data-primary-content
+    >
       <div class={styles.editorPane}>
         <div class={styles.toolBar}>
           <label for="runtime-source">HTML / CSS / JavaScript</label>
@@ -464,12 +537,14 @@ export const RuntimeHtmlPage: FC = () => (
 );
 
 export const NotFoundPage: FC = () => (
-  <section class={styles.notFound}>
-    <p class={styles.meta}>404</p>
-    <h1>ここには何もありません。</h1>
-    <p>URLを確認するか、Chanya.jpのホームへ戻ってください。</p>
-    <a class={styles.primaryButtonLarge} href="/">
-      Homeへ戻る
-    </a>
+  <section class={styles.notFound} data-page-layout="not-found">
+    <div>
+      <p class={styles.meta}>404</p>
+      <h1>ここには何もありません。</h1>
+      <p>URLを確認するか、Chanya.jpのホームへ戻ってください。</p>
+      <a class={styles.primaryButtonLarge} href="/">
+        Homeへ戻る
+      </a>
+    </div>
   </section>
 );

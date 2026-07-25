@@ -205,3 +205,174 @@ test("all public pages fit required viewports without horizontal scrolling", asy
     }
   }
 });
+
+test("visible main content stays inside required viewport bounds", async ({
+  page,
+}) => {
+  const viewports = [
+    { width: 320, height: 720 },
+    { width: 375, height: 812 },
+    { width: 414, height: 896 },
+    { width: 768, height: 1024 },
+  ] as const;
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+
+    for (const { path } of publicPages) {
+      await page.goto(path);
+      const outOfBounds = await page.locator("main").evaluate((main) => {
+        const viewportWidth = document.documentElement.clientWidth;
+        const candidates = main.querySelectorAll<HTMLElement>(
+          "section, aside, a, button, img, textarea, iframe",
+        );
+
+        return [...candidates].flatMap((element) => {
+          const styles = getComputedStyle(element);
+          if (
+            element.closest("[hidden], pre, dialog:not([open])") ||
+            styles.display === "none" ||
+            styles.visibility === "hidden"
+          ) {
+            return [];
+          }
+
+          const bounds = element.getBoundingClientRect();
+          if (
+            bounds.width === 0 ||
+            bounds.height === 0 ||
+            (bounds.left >= -1 && bounds.right <= viewportWidth + 1)
+          ) {
+            return [];
+          }
+
+          return [
+            {
+              element: element.tagName.toLowerCase(),
+              label:
+                element.getAttribute("aria-label") ??
+                element.textContent?.trim().replace(/\s+/g, " ").slice(0, 60) ??
+                "",
+              left: Math.round(bounds.left * 10) / 10,
+              right: Math.round(bounds.right * 10) / 10,
+              viewportWidth,
+            },
+          ];
+        });
+      });
+
+      expect(
+        outOfBounds,
+        `${path} has clipped main content at ${String(viewport.width)}px:\n${JSON.stringify(outOfBounds, null, 2)}`,
+      ).toEqual([]);
+    }
+  }
+});
+
+test("non-home primary content reaches the first desktop viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  for (const { path } of publicPages.slice(1)) {
+    await page.goto(path);
+
+    const pageLayout = page.locator("[data-page-layout]");
+    const primaryContent = page.locator("[data-primary-content]");
+    await expect(pageLayout, `${path} should have one page layout`).toHaveCount(
+      1,
+    );
+    await expect(
+      primaryContent,
+      `${path} should have one primary content region`,
+    ).toHaveCount(1);
+    await expect(primaryContent).toBeVisible();
+
+    const top = await primaryContent.evaluate(
+      (element) => element.getBoundingClientRect().top,
+    );
+    expect(top, `${path} primary content starts below the fold`).toBeLessThan(
+      800,
+    );
+  }
+});
+
+test("mobile tool and contact compositions remain ordered and in bounds", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/products/contents/RuntimeHtml/");
+
+  const paneBounds = await page.evaluate(() => {
+    const editor = document
+      .querySelector("[data-runtime-source]")
+      ?.closest("[data-primary-content] > *");
+    const preview = document
+      .querySelector("[data-runtime-frame]")
+      ?.closest("[data-primary-content] > *");
+
+    if (!(editor instanceof HTMLElement) || !(preview instanceof HTMLElement)) {
+      return null;
+    }
+
+    const editorBounds = editor.getBoundingClientRect();
+    const previewBounds = preview.getBoundingClientRect();
+    return {
+      editor: {
+        top: editorBounds.top,
+        bottom: editorBounds.bottom,
+      },
+      preview: {
+        top: previewBounds.top,
+        bottom: previewBounds.bottom,
+      },
+    };
+  });
+
+  expect(
+    paneBounds,
+    "RuntimeHtml editor and preview panes are missing",
+  ).not.toBeNull();
+  if (!paneBounds) {
+    throw new Error("RuntimeHtml editor and preview panes are missing");
+  }
+
+  expect(
+    paneBounds.preview.top,
+    "RuntimeHtml preview should follow the editor on mobile",
+  ).toBeGreaterThanOrEqual(paneBounds.editor.bottom - 1);
+
+  await page.goto("/contact/");
+  const emailRows = page.locator(
+    "[data-primary-content] a[href^='mailto:']",
+  );
+  await expect(emailRows).toHaveCount(2);
+
+  const emailBounds = await emailRows.evaluateAll((rows) => {
+    const viewportWidth = document.documentElement.clientWidth;
+    return rows.map((row) => {
+      const descendants = [row, ...row.children];
+      const bounds = descendants.map((element) =>
+        element.getBoundingClientRect(),
+      );
+
+      return {
+        label: row.getAttribute("href"),
+        left: Math.min(...bounds.map((rect) => rect.left)),
+        right: Math.max(...bounds.map((rect) => rect.right)),
+        viewportWidth,
+      };
+    });
+  });
+
+  for (const bounds of emailBounds) {
+    expect(
+      bounds.left,
+      `${bounds.label} extends past the left edge`,
+    ).toBeGreaterThanOrEqual(-1);
+    expect(
+      bounds.right,
+      `${bounds.label} extends past the right edge`,
+    ).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+  }
+});
