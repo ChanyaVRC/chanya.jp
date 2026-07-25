@@ -1,6 +1,7 @@
 import type { FC, PropsWithChildren } from "hono/jsx";
 import { Script, ViteClient } from "vite-ssr-components/hono";
 import { CommandPalette, Footer, Header } from "./components/SiteChrome";
+import { ViteImportedStyles } from "./components/ViteImportedStyles";
 import { site } from "./data/site";
 import type { PageMetadata } from "./types";
 import * as styles from "./styles/site.css";
@@ -40,6 +41,13 @@ export const Document: FC<DocumentProps> = ({
         <link rel="canonical" href={canonical} />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <ViteClient />
+        <ViteImportedStyles
+          entries={
+            clientEntry === "admin"
+              ? ["/src/client.ts", "/src/admin-client.ts"]
+              : ["/src/client.ts"]
+          }
+        />
         <Script src="/src/client.ts" />
         {clientEntry === "admin" ? (
           <Script src="/src/admin-client.ts" />

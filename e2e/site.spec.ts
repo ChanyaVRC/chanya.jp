@@ -14,6 +14,8 @@ const publicPages = [
   },
 ] as const;
 
+const productionPreviewUrl = "http://127.0.0.1:5174";
+
 async function assertNoAxeViolations(page: Page) {
   const results = await new AxeBuilder({ page }).analyze();
   const details = results.violations
@@ -27,6 +29,48 @@ async function assertNoAxeViolations(page: Page) {
 
   expect(results.violations, details).toEqual([]);
 }
+
+test("production preview links and applies shared site styles", async ({
+  page,
+}) => {
+  const stylesheetResponses: { readonly status: number; readonly url: string }[] =
+    [];
+  page.on("response", (response) => {
+    if (response.request().resourceType() === "stylesheet") {
+      stylesheetResponses.push({
+        status: response.status(),
+        url: response.url(),
+      });
+    }
+  });
+
+  const response = await page.goto(`${productionPreviewUrl}/`);
+  expect(response?.status()).toBe(200);
+
+  const linkedStylesheets = await page
+    .locator('link[rel="stylesheet"]')
+    .evaluateAll((links) =>
+      links.map((link) => (link as HTMLLinkElement).href),
+    );
+  expect(
+    linkedStylesheets.some((url) => /\/assets\/site-[^/]+\.css$/u.test(url)),
+  ).toBe(true);
+  expect(stylesheetResponses.length).toBeGreaterThanOrEqual(2);
+  expect(stylesheetResponses.every(({ status }) => status === 200)).toBe(true);
+
+  const computed = await page.evaluate(() => ({
+    bodyMargin: getComputedStyle(document.body).margin,
+    headerPosition: getComputedStyle(
+      document.querySelector("[data-site-header]")!,
+    ).position,
+    headingSize: Number.parseFloat(
+      getComputedStyle(document.querySelector("h1")!).fontSize,
+    ),
+  }));
+  expect(computed.bodyMargin).toBe("0px");
+  expect(computed.headerPosition).toBe("sticky");
+  expect(computed.headingSize).toBeGreaterThan(80);
+});
 
 test.describe("public pages", () => {
   for (const { path, heading } of publicPages) {
