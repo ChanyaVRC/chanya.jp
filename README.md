@@ -86,7 +86,8 @@ RuntimeHtmlのiframeは `sandbox="allow-scripts"` だけを付与します。
 iframe内CSPは `default-src 'none'`、`connect-src 'none'`、
 `form-action 'none'` で、`unsafe-eval` を許可しません。これにより親画面、
 Cookie / Storage、外部通信、フォーム、ポップアップ、トップ遷移への権限を
-与えず、入力したコードはブラウザ内だけで実行されます。
+与えず、入力したコードはブラウザ内だけで実行されます。RuntimeHtmlのHTML応答は
+`Cache-Control: no-transform` とし、CDNによるAnalytics script注入も止めます。
 
 ## Cloudflare Workers Builds
 
@@ -110,9 +111,13 @@ Cloudflare Dashboardの **Workers & Pages → Create → Import a repository**
 
 外部forkのpull requestにはCloudflareの認証情報を渡しません。
 GitHub Actionsはread-only権限で `npm ci`、型検査、Vitest、build、
-Playwrightだけを実行します。プレビュー確認後、Cloudflareの
-**Settings → Domains & Routes → Add → Custom Domain** で `chanya.jp` を
-接続します。既存のMX / TXTと `www` からapexへの301は変更しません。
+Playwrightだけを実行します。
+
+本番は既存のproxied A / AAAAを保持したまま `chanya.jp/*` のWorker Routeで
+配信します。Custom Domainへ移行する場合は、MX / TXTと `www` のレコードを
+残し、apexの外部管理A / AAAAだけを削除してから
+`routes` を `{ "pattern": "chanya.jp", "custom_domain": true }` に変更します。
+既存の `www` からapexへの301は変更しません。
 
 ## ブランチ保護
 

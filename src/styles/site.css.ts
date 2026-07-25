@@ -670,6 +670,12 @@ export const heroProof = style({
   alignItems: "end",
   minWidth: 0,
   paddingInlineEnd: vars.space[3],
+  "@media": {
+    "screen and (max-width: 23.5rem)": {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      paddingInlineEnd: 0,
+    },
+  },
 });
 
 export const profileFigure = style({
@@ -705,12 +711,21 @@ export const codeFigure = style({
   position: "relative",
   zIndex: 1,
   width: "clamp(12rem, 38vw, 22rem)",
+  minWidth: 0,
+  maxWidth: "100%",
   marginInlineStart: "-90%",
   marginBlockEnd: vars.space[5],
   padding: vars.space[4],
   border: `${vars.size.hairline} solid ${vars.color.graphite}`,
   background: vars.color.paperRaised,
   boxShadow: vars.shadow.raised,
+  "@media": {
+    "screen and (max-width: 23.5rem)": {
+      width: `calc(100% - ${vars.space[8]})`,
+      marginBlockStart: `calc(0px - ${vars.space[16]})`,
+      marginInlineStart: vars.space[8],
+    },
+  },
 });
 
 globalStyle(`${codeFigure} figcaption`, {

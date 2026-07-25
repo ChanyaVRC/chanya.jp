@@ -112,7 +112,7 @@ export const HomePage: FC = () => (
         </figure>
         <figure class={styles.codeFigure}>
           <figcaption>profile.ts</figcaption>
-          <pre>
+          <pre tabindex={0} aria-label="profile.ts のコード">
             <code>{`type Chanya = {
   name: "九島茶にゃ";
   role: "`}<span class={styles.srOnly}>多分技術者</span><span aria-hidden="true" data-type-line>多分技術者</span>{`";

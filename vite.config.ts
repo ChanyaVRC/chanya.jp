@@ -26,5 +26,10 @@ for (const plugin of vanillaExtractPlugins) {
 }
 
 export default defineConfig({
+  build: {
+    // Keep every font as a first-party Static Asset so the production CSP can
+    // remain `font-src 'self'` without data: fallbacks.
+    assetsInlineLimit: 0,
+  },
   plugins: [cloudflare(), ssrPlugin(), ...vanillaExtractPlugins],
 });

@@ -72,6 +72,20 @@ describe("HTTP security headers", () => {
     expect(policy).toContain("frame-ancestors 'none'");
   });
 
+  it("Cloudflareの安全なscript注入用nonceをリクエストごとに更新する", async () => {
+    const first = await app.request("https://chanya.jp/");
+    const second = await app.request("https://chanya.jp/");
+    const firstPolicy = first.headers.get("content-security-policy") ?? "";
+    const secondPolicy = second.headers.get("content-security-policy") ?? "";
+    const noncePattern = /script-src 'self' 'nonce-([0-9a-f]{32})'/;
+    const firstNonce = firstPolicy.match(noncePattern)?.[1];
+    const secondNonce = secondPolicy.match(noncePattern)?.[1];
+
+    expect(firstNonce).toBeDefined();
+    expect(secondNonce).toBeDefined();
+    expect(firstNonce).not.toBe(secondNonce);
+  });
+
   it("RuntimeHtmlページだけにローカルpreview用frameを許可する", async () => {
     const response = await app.request(
       "https://chanya.jp/products/contents/RuntimeHtml/",
@@ -79,8 +93,10 @@ describe("HTTP security headers", () => {
     const policy = response.headers.get("content-security-policy");
     const body = await response.text();
 
+    expect(policy).toContain("script-src 'self' 'unsafe-inline'");
     expect(policy).toContain("frame-src 'self' blob: data:");
     expect(policy).toContain("frame-ancestors 'none'");
+    expect(response.headers.get("cache-control")).toContain("no-transform");
     expect(body).toContain('sandbox="allow-scripts"');
     expect(body).toContain('referrerpolicy="no-referrer"');
   });

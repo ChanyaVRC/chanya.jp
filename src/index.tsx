@@ -52,6 +52,7 @@ app.use("*", async (c, next) => {
     return c.redirect(url.toString(), 308);
   }
 
+  const scriptNonce = crypto.randomUUID().replaceAll("-", "");
   await next();
 
   const isRuntimeHtml =
@@ -62,7 +63,7 @@ app.use("*", async (c, next) => {
     : "";
   const scriptSource = isRuntimeHtml
     ? `script-src 'self' 'unsafe-inline'${import.meta.env.DEV ? " 'unsafe-eval'" : ""}`
-    : `script-src 'self'${developmentDirectives}`;
+    : `script-src 'self' 'nonce-${scriptNonce}'${developmentDirectives}`;
   const connectSource = import.meta.env.DEV
     ? "connect-src 'self' ws: http:"
     : "connect-src 'self'";
@@ -95,7 +96,12 @@ app.use("*", async (c, next) => {
   c.header("X-Frame-Options", "DENY");
 
   if (c.res.headers.get("content-type")?.includes("text/html")) {
-    c.header("Cache-Control", "public, max-age=0, must-revalidate");
+    c.header(
+      "Cache-Control",
+      isRuntimeHtml
+        ? "public, max-age=0, must-revalidate, no-transform"
+        : "public, max-age=0, must-revalidate",
+    );
   }
 });
 
