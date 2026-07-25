@@ -144,10 +144,31 @@ test("profile code is complete, highlighted and visible in the first viewport", 
       if (!(pre instanceof HTMLElement)) {
         throw new Error("profile code pre is missing");
       }
+      const picture = photo.querySelector("picture");
+      const image = photo.querySelector("img");
+      if (!(picture instanceof HTMLElement && image instanceof HTMLImageElement)) {
+        throw new Error("profile picture is missing");
+      }
 
       const bounds = figure.getBoundingClientRect();
       const copyBounds = copy.getBoundingClientRect();
       const photoBounds = photo.getBoundingClientRect();
+      const pictureBounds = picture.getBoundingClientRect();
+      const imageBounds = image.getBoundingClientRect();
+      const imageStyle = getComputedStyle(image);
+      const intersectionArea = (first: DOMRect, second: DOMRect) => {
+        const width = Math.max(
+          0,
+          Math.min(first.right, second.right) -
+            Math.max(first.left, second.left),
+        );
+        const height = Math.max(
+          0,
+          Math.min(first.bottom, second.bottom) -
+            Math.max(first.top, second.top),
+        );
+        return width * height;
+      };
       const overlapWidth = Math.max(
         0,
         Math.min(bounds.right, photoBounds.right) -
@@ -181,8 +202,30 @@ test("profile code is complete, highlighted and visible in the first viewport", 
           bottom: photoBounds.bottom,
           left: photoBounds.left,
         },
+        picture: {
+          width: pictureBounds.width,
+          height: pictureBounds.height,
+          objectFit: imageStyle.objectFit,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          loaded: image.complete && image.naturalWidth > 0,
+          transform: imageStyle.transform,
+          clipPath: imageStyle.clipPath,
+          imageTop: imageBounds.top,
+          imageRight: imageBounds.right,
+          imageBottom: imageBounds.bottom,
+          imageLeft: imageBounds.left,
+          top: pictureBounds.top,
+          right: pictureBounds.right,
+          bottom: pictureBounds.bottom,
+          left: pictureBounds.left,
+        },
         intersectionArea: overlapWidth * overlapHeight,
+        copyCodeIntersection: intersectionArea(copyBounds, bounds),
+        copyPhotoIntersection: intersectionArea(copyBounds, photoBounds),
         viewportHeight: window.innerHeight,
+        viewportWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
         clientWidth: pre.clientWidth,
         scrollWidth: pre.scrollWidth,
         text: pre.textContent?.replace(/\r\n/g, "\n").trim() ?? "",
@@ -202,6 +245,12 @@ test("profile code is complete, highlighted and visible in the first viewport", 
       result.intersectionArea,
       `profile code overlaps the photo at ${String(viewport.width)}px`,
     ).toBeLessThanOrEqual(1);
+    expect(result.copyCodeIntersection).toBeLessThanOrEqual(1);
+    expect(result.copyPhotoIntersection).toBeLessThanOrEqual(1);
+    expect(
+      result.documentWidth,
+      `home page scrolls horizontally at ${String(viewport.width)}px`,
+    ).toBeLessThanOrEqual(result.viewportWidth + 1);
     expect(
       result.scrollWidth,
       `profile code scrolls horizontally at ${String(viewport.width)}px`,
@@ -214,6 +263,34 @@ test("profile code is complete, highlighted and visible in the first viewport", 
       "string",
       "type",
     ]);
+    expect(
+      Math.abs(result.picture.width - result.picture.height),
+      `profile icon is cropped to a non-square frame at ${String(viewport.width)}px`,
+    ).toBeLessThanOrEqual(1);
+    expect(result.picture.loaded).toBe(true);
+    expect(result.picture.objectFit).toBe("contain");
+    expect(result.picture.naturalWidth).toBe(result.picture.naturalHeight);
+    expect(result.picture.transform).toBe("none");
+    expect(result.picture.clipPath).toBe("none");
+    expect(Math.abs(result.picture.imageTop - result.picture.top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageRight - result.picture.right)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageBottom - result.picture.bottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageLeft - result.picture.left)).toBeLessThanOrEqual(1);
+
+    for (const [name, bounds] of [
+      ["copy", result.copy],
+      ["code", result.code],
+      ["profile", result.photo],
+    ] as const) {
+      expect(
+        bounds.left,
+        `${name} starts outside the viewport at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(-1);
+      expect(
+        bounds.right,
+        `${name} ends outside the viewport at ${String(viewport.width)}px`,
+      ).toBeLessThanOrEqual(result.viewportWidth + 1);
+    }
 
     if (viewport.width <= 768) {
       expect(
@@ -224,19 +301,37 @@ test("profile code is complete, highlighted and visible in the first viewport", 
         result.photo.top - result.code.bottom,
         `profile code and photo are cramped at ${String(viewport.width)}px`,
       ).toBeGreaterThanOrEqual(12);
+      expect(Math.abs(result.copy.left - result.code.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(result.copy.right - result.code.right)).toBeLessThanOrEqual(1);
+      expect(Math.abs(result.code.left - result.photo.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(result.code.right - result.photo.right)).toBeLessThanOrEqual(1);
     } else {
       expect(
-        result.code.top - result.photo.bottom,
-        `photo and profile code are cramped at ${String(viewport.width)}px`,
+        result.code.top - result.copy.bottom,
+        `copy and profile code are cramped at ${String(viewport.width)}px`,
       ).toBeGreaterThanOrEqual(12);
       expect(
-        Math.abs(result.code.left - result.photo.left),
-        `profile code and photo left edges differ at ${String(viewport.width)}px`,
+        result.photo.left - result.code.right,
+        `profile code and icon columns are cramped at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(12);
+      expect(
+        Math.abs(result.code.left - result.copy.left),
+        `profile code and copy left edges differ at ${String(viewport.width)}px`,
       ).toBeLessThanOrEqual(1);
       expect(
-        Math.abs(result.code.right - result.photo.right),
-        `profile code and photo right edges differ at ${String(viewport.width)}px`,
+        Math.abs(result.code.right - result.copy.right),
+        `profile code and copy right edges differ at ${String(viewport.width)}px`,
       ).toBeLessThanOrEqual(1);
+      expect(
+        result.photo.bottom,
+        `profile icon falls below the first viewport at ${String(viewport.width)}px`,
+      ).toBeLessThanOrEqual(result.viewportHeight + 1);
+      const leftCenter = (result.copy.top + result.code.bottom) / 2;
+      const profileCenter = (result.photo.top + result.photo.bottom) / 2;
+      expect(
+        Math.abs(leftCenter - profileCenter),
+        `hero columns are vertically unbalanced at ${String(viewport.width)}px`,
+      ).toBeLessThanOrEqual(32);
     }
   }
 });

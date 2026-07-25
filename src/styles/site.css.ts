@@ -1,5 +1,5 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
-/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
+/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · home variation: copy + code / uncropped icon · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
 import { createGlobalTheme, globalStyle, style } from "@vanilla-extract/css";
 import { designTokens, valuesOf } from "./design-tokens";
 
@@ -570,27 +570,32 @@ export const meta = style({
 export const heroSplit = style({
   ...sectionPad,
   display: "grid",
+  gridTemplateAreas: '"copy" "code" "profile"',
+  gridTemplateColumns: "minmax(0, 1fr)",
   width: "100%",
   maxWidth: vars.size.content,
   marginInline: "auto",
   paddingBlockStart: vars.space[12],
   paddingBlockEnd: vars.space[16],
-  gap: vars.space[8],
+  rowGap: vars.space[8],
   alignItems: "start",
   "@media": {
     "screen and (min-width: 60rem)": {
-      gridTemplateColumns: "minmax(0, 1.05fr) minmax(20rem, 0.95fr)",
+      gridTemplateAreas: '"copy profile" "code profile"',
+      gridTemplateColumns: "minmax(0, 7fr) minmax(20rem, 5fr)",
       minHeight: "calc(100svh - 4.5rem)",
       paddingInline: vars.space[8],
       paddingBlockStart: vars.space[16],
       paddingBlockEnd: vars.space[24],
-      gap: vars.space[12],
-      alignItems: "center",
+      columnGap: vars.space[12],
+      rowGap: vars.space[8],
+      alignContent: "center",
     },
   },
 });
 
 export const heroCopy = style({
+  gridArea: "copy",
   display: "grid",
   alignContent: "center",
   gap: vars.space[6],
@@ -671,42 +676,29 @@ export const secondaryButton = style({
   },
 });
 
-export const heroProof = style({
-  position: "relative",
-  display: "grid",
-  gridTemplateAreas: '"code" "profile"',
-  gridTemplateColumns: "minmax(0, 1fr)",
-  gap: vars.space[4],
-  minWidth: 0,
-  "@media": {
-    "screen and (min-width: 60rem)": {
-      gridTemplateAreas: '"profile" "code"',
-      alignContent: "center",
-    },
-  },
-});
-
 export const profileFigure = style({
   gridArea: "profile",
   minWidth: 0,
+  "@media": {
+    "screen and (min-width: 60rem)": {
+      width: "min(100%, 25rem)",
+      justifySelf: "end",
+      alignSelf: "center",
+    },
+  },
 });
 
 globalStyle(`${profileFigure} picture`, {
   aspectRatio: "1",
   overflow: "hidden",
   background: vars.color.paperQuiet,
-  "@media": {
-    "screen and (min-width: 60rem)": {
-      aspectRatio: "3 / 2",
-    },
-  },
 });
 
 globalStyle(`${profileFigure} img`, {
   width: "100%",
   height: "100%",
-  objectFit: "cover",
-  objectPosition: "center 48%",
+  objectFit: "contain",
+  objectPosition: "center",
 });
 
 globalStyle(`${profileFigure} figcaption`, {

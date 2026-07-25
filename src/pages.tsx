@@ -28,7 +28,7 @@ const ProfilePicture: FC<{ readonly priority?: boolean }> = ({ priority }) => (
 );
 
 const ProfileCode: FC = () => (
-  <figure class={styles.codeFigure} data-profile-code>
+  <figure class={styles.codeFigure} data-profile-code data-reveal>
     <figcaption>profile.ts</figcaption>
     <pre tabindex={0} aria-label="profile.ts のTypeScriptコード">
       <code><span data-syntax="keyword">type</span>{" "}<span data-syntax="type">Chanya</span>{` = {
@@ -120,16 +120,19 @@ export const HomePage: FC = () => (
         </div>
       </div>
 
-      <div class={styles.heroProof} data-reveal>
-        <ProfileCode />
-        <figure class={styles.profileFigure} data-profile-photo>
-          <ProfilePicture priority />
-          <figcaption>
-            <strong>九島茶にゃ</strong>
-            <span>Twitterの姿</span>
-          </figcaption>
-        </figure>
-      </div>
+      <ProfileCode />
+
+      <figure
+        class={styles.profileFigure}
+        data-profile-photo
+        data-reveal
+      >
+        <ProfilePicture priority />
+        <figcaption>
+          <strong>九島茶にゃ</strong>
+          <span>Twitterの姿</span>
+        </figcaption>
+      </figure>
     </section>
 
     <section class={styles.darkBand} aria-labelledby="current-work-title">
