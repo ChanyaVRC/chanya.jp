@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["vite/client", "node"]
+  },
+  "include": [
+    "src/components/**/*.tsx",
+    "src/data/**/*.ts",
+    "src/gallery/**/*.ts",
+    "src/styles/**/*.ts",
+    "src/index.tsx",
+    "src/pages.tsx",
+    "src/renderer.tsx",
+    "src/runtime-policy.ts",
+    "src/types.ts",
+    "test/**/*.ts",
+    "worker-configuration.d.ts",
+    "worker-runtime.d.ts"
+  ]
+}

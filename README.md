@@ -2,7 +2,9 @@
 
 九島茶にゃ（Chanya Kushima）の開発、VRChat、写真をまとめた個人サイトです。
 Hono JSXでHTMLをサーバーレンダリングし、Cloudflare WorkersとStatic Assetsから
-配信します。React、PHP、DB、KV、D1、R2、CMS、フォームAPIは使用しません。
+配信します。React、PHP、DB、KV、D1、外部CMS、フォームAPIは使用しません。
+公開ページはDB不要のままです。Gallery WorkbenchだけがCloudflare Access、
+R2、Images bindingを使います。
 
 ## 技術構成
 
@@ -12,6 +14,7 @@ Hono JSXでHTMLをサーバーレンダリングし、Cloudflare WorkersとStati
 - Vite + Cloudflare Vite plugin
 - Vanilla Extract（型付きデザイントークンと静的CSS）
 - DOM APIのみのクライアントTypeScript
+- Cloudflare Access + R2 + Images binding（Gallery Workbench）
 - Vitest、Playwright、axe-core
 
 アプリケーションコードは `.ts`、`.tsx`、`.css.ts` に統一しています。
@@ -21,7 +24,9 @@ JSONC設定、Markdown文書、画像、フォント、生成物だけが例外�
 src/
 ├─ components/       ヘッダー、フッター、検索パレット
 ├─ data/             型付きの本文、リンク、ギャラリーデータ
+├─ gallery/          manifest検証、Access認証、R2版管理
 ├─ styles/           デザイントークンとVanilla Extract
+├─ admin-client.ts   visual-first編集、取込、並べ替え、Undo、公開
 ├─ client.ts         検索、ギャラリー、RuntimeHtmlの操作
 ├─ index.tsx         HonoルートとHTTPセキュリティヘッダー
 ├─ pages.tsx         各ページのHono JSX
@@ -66,6 +71,7 @@ Lighthouseは別ターミナルで`npm run dev`を起動してから実行し、
 | `/` | Home |
 | `/about/` | プロフィール |
 | `/gallery/` | 所有画像42作品のカタログ |
+| `/admin/gallery/` | Access保護されたGallery Workbench |
 | `/development/` | VRCOscLib、RuntimeHtml、Chanya.jp |
 | `/contact/` | メールとSNS |
 | `/other/` | 外部リンク |
@@ -74,6 +80,83 @@ Lighthouseは別ターミナルで`npm run dev`を起動してから実行し、
 末尾スラッシュなしの公開URLは同じURLの末尾スラッシュ付きへ308で転送します。
 未定義ルートは専用404を返します。`robots.txt`、`sitemap.xml`、
 `favicon.svg` もWorkerから配信します。
+
+## Gallery Workbench
+
+`/admin/gallery/` は公開Galleryと同じ `GalleryCanvas` を使います。写真を直接
+選択し、順序、standard / wide / feature、タイトル、撮影日、alt、焦点位置を
+編集できます。VRChat画像フォルダは `showDirectoryPicker()` で選択し、未対応
+ブラウザではdirectory file inputへフォールバックします。選択直後はローカル
+previewを出し、JPEG / PNG / WebPだけを1枚20MB・50MP以下でR2へ送信します。
+
+下書きは700msで自動保存され、手動保存、Undo、キーボード移動、
+競合時rollbackにも対応します。「公開する」で検証済みdraft manifestを
+published manifestへ切り替えます。両方は `manifests/state.json` にまとめて
+条件付きで原子的に更新するため、保存と公開が重なっても古い下書きを公開しません。
+管理画面から外した画像はR2から削除しません。
+
+既存42枚はGit管理のseed manifestとしてそのまま使えます。R2が空でも公開Gallery
+は表示され、初回の下書き保存からR2管理が始まります。新規画像の原本は
+`assets/<uuid>` に非公開で保存し、公開URLはImages bindingが生成する
+640 / 1280 / 1920pxのAVIF / WebPだけです。下書き画像のpreviewはAccess配下の
+専用URLを使い、公開manifestへ入るまでは公開画像URLから取得できません。UUIDは
+ブラウザ側で先に決めるため、upload応答が途切れても同じobjectへ安全に再送します。
+公開変換画像はETag付きで毎回所属を再検証し、公開から外した後に長期cacheだけが
+残ることも避けています。
+
+### 本番準備
+
+1. [R2 bucketの作成手順](https://developers.cloudflare.com/r2/buckets/create-buckets/)
+   を開き、bucketを一度だけ作成します。
+
+   ```sh
+   npx wrangler r2 bucket create chanya-gallery
+   ```
+
+2. [GitHub OAuth Apps](https://github.com/settings/developers) の
+   **Settings → Developer settings → OAuth Apps** で
+   `Chanya Gallery Admin` を作成します。入力項目の詳細は
+   [GitHub公式の作成手順](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)
+   でも確認できます。
+
+   - Homepage URL:
+     `https://<team-name>.cloudflareaccess.com`
+   - Authorization callback URL:
+     `https://<team-name>.cloudflareaccess.com/cdn-cgi/access/callback`
+
+3. [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) の
+   **Integrations → Identity providers** へGitHubを追加し、OAuth Appの
+   Client ID / Client secretを入力します。設定値と画面操作は
+   [GitHub IdPの公式手順](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/github/)
+   に沿います。
+   `Finish setup` と `Test` まで完了させます。Client secretはCloudflareだけに
+   保存し、リポジトリ、`.dev.vars`、`wrangler.jsonc` には入れません。
+
+4. [AccessのSelf-hosted application作成手順](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
+   に沿って `chanya.jp/admin/gallery*` を保護し、Login methodをGitHubだけにして
+   **Auto redirect to identity** を有効にします。Allow policyは
+   [Access policyの公式手順](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
+   に沿って、管理者のGitHub primary emailをIncludeし、
+   Login Methods = GitHubもRequireします。
+
+5. [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/)
+   を参照し、`wrangler.jsonc` の `CF_ACCESS_TEAM_DOMAIN` と
+   `CF_ACCESS_AUD` を実値へ置き換えます。`GALLERY_ADMIN_EMAIL` は
+   GitHubがAccessへ返すprimary emailを
+   [Worker Secret](https://developers.cloudflare.com/workers/configuration/secrets/)
+   として対話入力し、リポジトリには保存しません。
+
+   ```sh
+   npx wrangler secret put GALLERY_ADMIN_EMAIL
+   ```
+
+   設定後に
+   [`npm run deploy`](https://developers.cloudflare.com/workers/wrangler/commands/workers/#deploy)
+   します。
+
+`workers_dev` とPreview URLは管理境界の迂回を防ぐため無効です。ローカルの
+`http://localhost` だけはproduction buildに含まれない開発用bypassを使います。
+必要なら `.dev.vars.example` を `.dev.vars` へコピーして設定してください。
 
 ## セキュリティ
 
@@ -88,6 +171,12 @@ iframe内CSPは `default-src 'none'`、`connect-src 'none'`、
 Cookie / Storage、外部通信、フォーム、ポップアップ、トップ遷移への権限を
 与えず、入力したコードはブラウザ内だけで実行されます。RuntimeHtmlのHTML応答は
 `Cache-Control: no-transform` とし、CDNによるAnalytics script注入も止めます。
+
+Gallery WorkbenchはGitHub IdPだけを許可したCloudflare Accessを使い、Access JWTを
+Workerでも再検証して管理者emailを固定します。更新要求は同一Origin、
+custom header、SameSite CSRF cookieを必須にし、管理HTML/APIは
+`private, no-store` と `noindex` を返します。画像はmagic bytesとImages bindingの
+decode結果を検証し、ローカルファイル名やJWTをログへ残しません。
 
 ## Cloudflare Workers Builds
 

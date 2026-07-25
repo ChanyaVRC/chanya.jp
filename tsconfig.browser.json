@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/data/**/*.ts",
+    "src/gallery/manifest.ts",
+    "src/styles/**/*.ts",
+    "src/admin-client.ts",
+    "src/client.ts",
+    "src/runtime-policy.ts",
+    "src/types.ts",
+    "scripts/**/*.ts",
+    "e2e/**/*.ts",
+    "*.config.ts"
+  ]
+}

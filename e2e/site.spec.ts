@@ -290,6 +290,41 @@ test("gallery exposes 42 works in a closable dialog", async ({ page }) => {
     .toBe(true);
 });
 
+test("gallery visual order matches DOM order and feature art stays sharp", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.goto("/gallery/");
+
+  const featureImage = page
+    .locator("[data-gallery-grid] [data-layout='feature'] img")
+    .first();
+  await expect
+    .poll(() =>
+      featureImage.evaluate((image) =>
+        image instanceof HTMLImageElement ? image.currentSrc : "",
+      ),
+    )
+    .toMatch(/nankotsu-01-1280\.(?:avif|webp)$/u);
+
+  const positions = await page
+    .locator("[data-gallery-grid] > [data-gallery-id]")
+    .evaluateAll((items) =>
+      items.map((item) => {
+        const bounds = item.getBoundingClientRect();
+        return { top: bounds.top, left: bounds.left };
+      }),
+    );
+  for (let index = 1; index < positions.length; index += 1) {
+    const previous = positions[index - 1]!;
+    const current = positions[index]!;
+    expect(current.top + 1).toBeGreaterThanOrEqual(previous.top);
+    if (Math.abs(current.top - previous.top) <= 1) {
+      expect(current.left + 1).toBeGreaterThanOrEqual(previous.left);
+    }
+  }
+});
+
 test("RuntimeHtml runs locally inside its restricted sandbox", async ({
   page,
 }) => {
@@ -526,4 +561,199 @@ test("mobile tool and contact compositions remain ordered and in bounds", async 
       `${bounds.label} extends past the right edge`,
     ).toBeLessThanOrEqual(bounds.viewportWidth + 1);
   }
+});
+
+test("Gallery Workbench edits the shared canvas and imports a VRChat image", async ({
+  page,
+}) => {
+  let revision = 1;
+  const managedKey = "7cc2ac97-23d5-46fd-8b33-5f45275474dc";
+  const pixel = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+
+  await page.route("**/admin/gallery/api/assets", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        asset: { key: managedKey, width: 1, height: 1 },
+      }),
+    });
+  });
+  await page.route("**/admin/gallery/api/draft", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    const request: unknown = route.request().postDataJSON();
+    if (
+      typeof request !== "object" ||
+      request === null ||
+      !("items" in request) ||
+      !Array.isArray(request.items)
+    ) {
+      await route.fulfill({ status: 400, body: "Invalid test request" });
+      return;
+    }
+    const items = request.items;
+    revision += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        manifest: {
+          schemaVersion: 1,
+          version: revision,
+          updatedAt: new Date().toISOString(),
+          items,
+        },
+      }),
+    });
+  });
+  await page.route("**/media/gallery-managed/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: pixel,
+    });
+  });
+
+  const response = await page.goto("/admin/gallery/");
+  expect(response?.status()).toBe(200);
+  await expect(
+    page.getByRole("link", { name: "ログアウト" }),
+  ).toHaveAttribute("href", "/cdn-cgi/access/logout");
+
+  const editorItems = page.locator("[data-gallery-select]");
+  await expect(editorItems).toHaveCount(42);
+  await editorItems.first().click();
+
+  const inspector = page.locator("[data-gallery-inspector]");
+  await expect(inspector).toBeVisible();
+  const title = page.getByLabel("タイトル");
+  await expect(title).toBeFocused();
+  await expect(title).toHaveValue("Nankotsu 01");
+  await title.fill("Nankotsu / Arrival");
+  await page.locator("[data-gallery-save]").click();
+  await expect(editorItems.first().locator("..").locator("figcaption")).toContainText(
+    "Nankotsu / Arrival",
+  );
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+
+  await page.locator("[data-gallery-undo]").click();
+  await expect(editorItems.first().locator("..").locator("figcaption")).toContainText(
+    "Nankotsu 01",
+  );
+
+  const folderInput = page.locator("[data-gallery-folder-input]");
+  await folderInput.evaluate((element) => {
+    element.removeAttribute("webkitdirectory");
+  });
+  await folderInput.setInputFiles({
+    name: "VRChat_2026-07-25_12-00-00.png",
+    mimeType: "image/png",
+    buffer: pixel,
+  });
+  await expect(editorItems).toHaveCount(43);
+  await expect(page.locator("[data-gallery-count]")).toHaveText("43");
+  await expect(
+    page.locator("[data-gallery-grid] figcaption").last(),
+  ).toContainText("VRChat 2026-07-25");
+
+  await page.locator("[data-inspector-close]").click();
+  await page.setViewportSize({ width: 375, height: 812 });
+  await editorItems.last().click();
+  await expect(inspector).toBeVisible();
+  await expect(title).toBeFocused();
+  const inspectorBounds = await inspector.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      left: bounds.left,
+      right: bounds.right,
+      width: document.documentElement.clientWidth,
+    };
+  });
+  expect(inspectorBounds.left).toBeGreaterThanOrEqual(-1);
+  expect(inspectorBounds.right).toBeLessThanOrEqual(inspectorBounds.width + 1);
+  const overlap = await page.evaluate(() => {
+    const selected = document.querySelector<HTMLElement>(
+      "[data-gallery-select][aria-pressed='true']",
+    );
+    const sheet = document.querySelector<HTMLElement>(
+      "[data-gallery-inspector][data-open='true']",
+    );
+    if (!selected || !sheet) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const selectedBounds = selected.getBoundingClientRect();
+    const sheetBounds = sheet.getBoundingClientRect();
+    const width = Math.max(
+      0,
+      Math.min(selectedBounds.right, sheetBounds.right) -
+        Math.max(selectedBounds.left, sheetBounds.left),
+    );
+    const height = Math.max(
+      0,
+      Math.min(selectedBounds.bottom, sheetBounds.bottom) -
+        Math.max(selectedBounds.top, sheetBounds.top),
+    );
+    return width * height;
+  });
+  expect(overlap).toBe(0);
+  await assertNoAxeViolations(page);
+});
+
+test("Gallery Workbench toolbar remains reachable at 320px", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/admin/gallery/");
+
+  const toolbar = page.locator("[data-gallery-toolbar-actions]");
+  const result = await toolbar.evaluate((actions) => {
+    const folder = actions.querySelector<HTMLElement>(
+      "[data-gallery-import]",
+    );
+    const publish = actions.querySelector<HTMLElement>(
+      "[data-gallery-publish]",
+    );
+    const logout = actions.querySelector<HTMLElement>(
+      "[data-gallery-logout]",
+    );
+    if (!folder || !publish || !logout) {
+      throw new Error("Gallery toolbar controls are missing.");
+    }
+
+    const container = actions.getBoundingClientRect();
+    const folderBounds = folder.getBoundingClientRect();
+    const folderInitiallyVisible =
+      folderBounds.left >= container.left - 1 &&
+      folderBounds.right <= container.right + 1;
+    actions.scrollLeft = actions.scrollWidth;
+    const publishBounds = publish.getBoundingClientRect();
+    const logoutBounds = logout.getBoundingClientRect();
+
+    return {
+      folderInitiallyVisible,
+      publishAfterScroll:
+        publishBounds.left >= container.left - 1 &&
+        publishBounds.right <= container.right + 1,
+      logoutAfterScroll:
+        logoutBounds.left >= container.left - 1 &&
+        logoutBounds.right <= container.right + 1,
+      scrollable: actions.scrollWidth > actions.clientWidth,
+      pageWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth,
+    };
+  });
+
+  expect(result.folderInitiallyVisible).toBe(true);
+  expect(result.publishAfterScroll).toBe(true);
+  expect(result.logoutAfterScroll).toBe(true);
+  expect(result.scrollable).toBe(true);
+  expect(result.pageWidth).toBeLessThanOrEqual(result.viewportWidth);
 });

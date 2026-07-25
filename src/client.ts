@@ -322,18 +322,28 @@ function initialiseGallery(): void {
   const closeButton = asButton(
     dialog.querySelector("[data-lightbox-close]"),
   );
-  const openButtons = Array.from(
-    document.querySelectorAll<HTMLButtonElement>("[data-gallery-open]"),
-  );
   let returnFocus: HTMLButtonElement | null = null;
   let currentIndex = 0;
+
+  const openButtons = (): readonly HTMLButtonElement[] =>
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>("[data-gallery-open]"),
+    );
 
   const showImage = (button: HTMLButtonElement): void => {
     image.src = button.dataset.gallerySrc ?? "";
     image.alt = button.dataset.galleryAlt ?? "";
     title.textContent = button.dataset.galleryTitle ?? "Nankotsu";
     date.textContent = button.dataset.galleryDate ?? "";
-    currentIndex = Math.max(0, openButtons.indexOf(button));
+    const width = Number(button.dataset.galleryWidth);
+    const height = Number(button.dataset.galleryHeight);
+    if (Number.isInteger(width) && width > 0) {
+      image.width = width;
+    }
+    if (Number.isInteger(height) && height > 0) {
+      image.height = height;
+    }
+    currentIndex = Math.max(0, openButtons().indexOf(button));
   };
 
   const open = (button: HTMLButtonElement): void => {
@@ -353,10 +363,15 @@ function initialiseGallery(): void {
     }
   };
 
-  openButtons.forEach((button) => {
-    button.addEventListener("click", () => {
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    const button =
+      target instanceof Element
+        ? target.closest<HTMLButtonElement>("[data-gallery-open]")
+        : null;
+    if (button) {
       open(button);
-    });
+    }
   });
 
   closeButton?.addEventListener("click", close);
@@ -371,11 +386,15 @@ function initialiseGallery(): void {
     }
 
     event.preventDefault();
+    const buttons = openButtons();
+    if (buttons.length === 0) {
+      return;
+    }
     const offset = event.key === "ArrowRight" ? 1 : -1;
     const nextIndex =
-      ((currentIndex + offset) % openButtons.length + openButtons.length) %
-      openButtons.length;
-    const nextButton = openButtons[nextIndex];
+      ((currentIndex + offset) % buttons.length + buttons.length) %
+      buttons.length;
+    const nextButton = buttons[nextIndex];
     if (nextButton) {
       showImage(nextButton);
     }

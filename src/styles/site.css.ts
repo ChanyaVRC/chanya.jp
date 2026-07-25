@@ -1,5 +1,5 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · home variation: identity copy / uncropped icon · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
+/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Workbench / Component Playground) · home variation: identity copy / uncropped icon · theme: Cobalt · enrichment: owned VRChat photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
 import { createGlobalTheme, globalStyle, style } from "@vanilla-extract/css";
 import { designTokens, valuesOf } from "./design-tokens";
 
@@ -340,8 +340,8 @@ export const primaryButton = style({
   display: "none",
   placeItems: "center",
   paddingInline: vars.space[4],
-  borderColor: vars.color.cobalt,
-  background: vars.color.cobalt,
+  borderColor: vars.color.cobaltDark,
+  background: vars.color.cobaltDark,
   color: vars.color.accentInk,
   fontWeight: vars.weight.semibold,
   selectors: {
@@ -359,8 +359,8 @@ export const primaryButton = style({
     "(hover: hover)": {
       selectors: {
         "&:hover": {
-          borderColor: vars.color.cobaltDark,
-          background: vars.color.cobaltDark,
+          borderColor: vars.color.graphite,
+          background: vars.color.graphite,
         },
       },
     },
@@ -689,14 +689,18 @@ export const profileFigure = style({
 });
 
 globalStyle(`${profileFigure} picture`, {
+  position: "relative",
   aspectRatio: "1",
   overflow: "hidden",
   background: vars.color.paperQuiet,
 });
 
 globalStyle(`${profileFigure} img`, {
+  position: "absolute",
+  inset: 0,
   width: "100%",
-  height: "100%",
+  height: "auto",
+  aspectRatio: "1",
   objectFit: "contain",
   objectPosition: "center",
 });
@@ -1227,7 +1231,28 @@ export const galleryGrid = style({
 });
 
 export const galleryItem = style({
+  position: "relative",
   minWidth: 0,
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
+});
+
+export const galleryItemWide = style({
+  "@media": {
+    "screen and (min-width: 40rem)": {
+      gridColumn: "span 2",
+    },
+  },
+});
+
+export const galleryItemFeature = style({
+  "@media": {
+    "screen and (min-width: 40rem)": {
+      gridColumn: "span 2",
+    },
+    "screen and (min-width: 60rem)": {
+      gridColumn: "1 / -1",
+    },
+  },
 });
 
 globalStyle(`${galleryItem} figcaption`, {
@@ -1273,6 +1298,25 @@ globalStyle(`${galleryButton} img`, {
   aspectRatio: "16 / 9",
   objectFit: "cover",
   transition: `transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
+});
+
+globalStyle(
+  `${galleryItemWide} ${galleryButton} img, ${galleryItemFeature} ${galleryButton} img`,
+  {
+    "@media": {
+      "screen and (min-width: 40rem)": {
+        aspectRatio: "2 / 1",
+      },
+    },
+  },
+);
+
+globalStyle(`${galleryItemFeature} ${galleryButton} img`, {
+  "@media": {
+    "screen and (min-width: 60rem)": {
+      aspectRatio: "21 / 9",
+    },
+  },
 });
 
 globalStyle(`${galleryButton}:hover img`, {
@@ -1334,6 +1378,360 @@ globalStyle(`${lightboxTopbar} button`, {
   background: vars.color.transparent,
   color: vars.color.inverse,
   cursor: "pointer",
+});
+
+export const adminToolbar = style({
+  ...sectionPad,
+  position: "sticky",
+  zIndex: 35,
+  insetBlockStart: "4.5rem",
+  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
+  background: `color-mix(in oklab, ${vars.color.paperRaised} 94%, ${vars.color.transparent})`,
+  backdropFilter: "blur(0.75rem)",
+});
+
+export const adminToolbarInner = style({
+  display: "flex",
+  width: "100%",
+  maxWidth: vars.size.content,
+  minHeight: "4.25rem",
+  marginInline: "auto",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: vars.space[4],
+  "@media": {
+    "screen and (max-width: 39.99rem)": {
+      display: "grid",
+      paddingBlock: vars.space[2],
+      gap: vars.space[2],
+    },
+  },
+});
+
+export const adminIdentity = style({
+  display: "grid",
+  minWidth: 0,
+  gap: vars.space[1],
+});
+
+globalStyle(`${adminIdentity} strong`, {
+  fontFamily: vars.font.display,
+  fontSize: "0.88rem",
+});
+
+globalStyle(`${adminIdentity} span`, {
+  overflow: "hidden",
+  color: vars.color.graphiteSoft,
+  fontFamily: vars.font.mono,
+  fontSize: "0.64rem",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+export const adminToolbarActions = style({
+  display: "flex",
+  flex: "1 1 auto",
+  minWidth: 0,
+  alignItems: "center",
+  justifyContent: "flex-start",
+  gap: vars.space[2],
+  overflowX: "auto",
+  overscrollBehaviorInline: "contain",
+  scrollbarWidth: "thin",
+});
+
+export const adminStatus = style({
+  display: "inline-flex",
+  minHeight: vars.size.control,
+  alignItems: "center",
+  gap: vars.space[2],
+  paddingInline: vars.space[3],
+  color: vars.color.graphiteSoft,
+  fontSize: "0.72rem",
+  whiteSpace: "nowrap",
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}`,
+  selectors: {
+    "&::before": {
+      width: vars.space[2],
+      height: vars.space[2],
+      borderRadius: vars.radius.round,
+      background: vars.color.graphiteSoft,
+      content: "",
+    },
+    "&[data-state='saving']::before": {
+      background: vars.color.cobalt,
+    },
+    "&[data-state='saved']::before": {
+      background: vars.color.success,
+    },
+    "&[data-state='error']::before": {
+      background: vars.color.danger,
+    },
+  },
+});
+
+const adminControl = {
+  ...controlReset,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  paddingInline: vars.space[3],
+  background: vars.color.paperRaised,
+  fontSize: "0.74rem",
+  fontWeight: vars.weight.medium,
+} as const;
+
+export const adminButton = style({
+  ...adminControl,
+  selectors: {
+    "&:hover": {
+      "@media": {
+        "(hover: hover) and (pointer: fine)": {
+          borderColor: vars.color.graphiteSoft,
+        },
+      },
+    },
+  },
+});
+
+export const adminPrimaryButton = style({
+  ...adminControl,
+  borderColor: vars.color.cobalt,
+  background: vars.color.cobalt,
+  color: vars.color.accentInk,
+  selectors: {
+    "&:hover": {
+      "@media": {
+        "(hover: hover) and (pointer: fine)": {
+          background: vars.color.cobaltDark,
+        },
+      },
+    },
+  },
+});
+
+export const galleryEditable = style({
+  selectors: {
+    "&[data-dragging='true']": {
+      zIndex: 3,
+      opacity: 0.55,
+    },
+  },
+});
+
+export const galleryEditorButton = style({
+  position: "relative",
+  cursor: "pointer",
+  selectors: {
+    "&[aria-pressed='true']": {
+      borderColor: vars.color.cobalt,
+      boxShadow: `0 0 0 ${vars.size.focusRing} ${vars.color.cobalt}`,
+    },
+    "&:active": {
+      transform: "none",
+    },
+  },
+});
+
+export const galleryOrderBadge = style({
+  position: "absolute",
+  zIndex: 2,
+  insetBlockStart: vars.space[2],
+  insetInlineStart: vars.space[2],
+  display: "grid",
+  minWidth: vars.size.control,
+  minHeight: vars.size.control,
+  paddingInline: vars.space[2],
+  placeItems: "center",
+  border: `${vars.size.hairline} solid ${vars.color.inverseSoft}`,
+  borderRadius: vars.radius.control,
+  background: `color-mix(in oklab, ${vars.color.graphite} 86%, ${vars.color.transparent})`,
+  color: vars.color.inverse,
+  fontFamily: vars.font.mono,
+  fontSize: "0.66rem",
+  pointerEvents: "none",
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}`,
+});
+
+export const adminInspector = style({
+  position: "fixed",
+  zIndex: 60,
+  insetInline: 0,
+  insetBlockEnd: 0,
+  display: "grid",
+  maxHeight: "52dvh",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  borderTop: `${vars.size.hairline} solid ${vars.color.graphite}`,
+  background: vars.color.paperRaised,
+  boxShadow: vars.shadow.raised,
+  opacity: 0,
+  pointerEvents: "none",
+  transform: "translateY(100%)",
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
+  "@media": {
+    "screen and (min-width: 64rem)": {
+      insetBlock: "8.75rem 0",
+      insetInline: "auto 0",
+      width: "min(24rem, 100%)",
+      maxHeight: "none",
+      borderTop: 0,
+      borderInlineStart: `${vars.size.hairline} solid ${vars.color.graphite}`,
+      transform: "translateX(100%)",
+    },
+  },
+});
+
+globalStyle(`${adminInspector}[data-open='true']`, {
+  opacity: 1,
+  pointerEvents: "auto",
+  transform: "none",
+});
+
+globalStyle(
+  `[data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryMasthead}, [data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryGrid}`,
+  {
+    "@media": {
+      "screen and (min-width: 64rem)": {
+        width: "calc(100% - 24rem)",
+        marginInlineStart: "auto",
+        marginInlineEnd: "24rem",
+      },
+    },
+  },
+);
+
+globalStyle(
+  `[data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryGrid}`,
+  {
+    paddingBlockEnd: `calc(52dvh + ${vars.space[16]})`,
+    "@media": {
+      "screen and (min-width: 64rem)": {
+        paddingBlockEnd: vars.space[16],
+      },
+      "screen and (min-width: 64rem) and (max-width: 87.99rem)": {
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      },
+    },
+  },
+);
+
+globalStyle(
+  `[data-gallery-admin]:has(${adminInspector}[data-open='true']) ${galleryEditable}:has(${galleryEditorButton}[aria-pressed='true'])`,
+  {
+    scrollMarginBlockStart: "9.75rem",
+    scrollMarginBlockEnd: "54dvh",
+    "@media": {
+      "screen and (min-width: 64rem)": {
+        scrollMarginBlockStart: 0,
+        scrollMarginBlockEnd: 0,
+      },
+    },
+  },
+);
+
+export const adminInspectorHeader = style({
+  display: "flex",
+  minHeight: "4.5rem",
+  paddingInline: vars.space[4],
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: vars.space[4],
+  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
+});
+
+globalStyle(`${adminInspectorHeader} div`, {
+  display: "grid",
+  minWidth: 0,
+  gap: vars.space[1],
+});
+
+globalStyle(`${adminInspectorHeader} strong`, {
+  overflow: "hidden",
+  fontFamily: vars.font.display,
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(`${adminInspectorHeader} span`, {
+  color: vars.color.graphiteSoft,
+  fontFamily: vars.font.mono,
+  fontSize: "0.64rem",
+});
+
+export const adminInspectorBody = style({
+  display: "grid",
+  alignContent: "start",
+  padding: vars.space[4],
+  gap: vars.space[5],
+  overflowY: "auto",
+});
+
+export const adminField = style({
+  display: "grid",
+  gap: vars.space[2],
+  color: vars.color.graphiteSoft,
+  fontSize: "0.7rem",
+});
+
+globalStyle(`${adminField} input, ${adminField} textarea, ${adminField} select`, {
+  width: "100%",
+  minHeight: vars.size.control,
+  padding: `${vars.space[2]} ${vars.space[3]}`,
+  border: `${vars.size.hairline} solid ${vars.color.line}`,
+  borderRadius: vars.radius.control,
+  background: vars.color.paper,
+  color: vars.color.graphite,
+});
+
+globalStyle(`${adminField} textarea`, {
+  minHeight: "6.5rem",
+  resize: "vertical",
+});
+
+export const adminFieldRow = style({
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: vars.space[3],
+});
+
+export const adminInspectorActions = style({
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: vars.space[2],
+  paddingBlockStart: vars.space[3],
+  borderTop: `${vars.size.hairline} solid ${vars.color.line}`,
+});
+
+globalStyle(`[data-gallery-admin][data-preview='true'] ${galleryOrderBadge}`, {
+  opacity: 0,
+});
+
+globalStyle(`[data-gallery-admin][data-preview='true'] ${galleryEditorButton}`, {
+  cursor: "zoom-in",
+});
+
+export const adminToast = style({
+  position: "fixed",
+  zIndex: 70,
+  insetInlineStart: vars.space[4],
+  insetBlockEnd: vars.space[4],
+  maxWidth: `calc(100% - ${vars.space[8]})`,
+  padding: `${vars.space[3]} ${vars.space[4]}`,
+  border: `${vars.size.hairline} solid ${vars.color.graphite}`,
+  borderRadius: vars.radius.control,
+  background: vars.color.graphite,
+  color: vars.color.inverse,
+  fontSize: "0.78rem",
+  opacity: 0,
+  pointerEvents: "none",
+  transform: `translateY(${vars.space[2]})`,
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.quick} ${vars.motion.easeOut}`,
+  selectors: {
+    "&[data-open='true']": {
+      opacity: 1,
+      transform: "none",
+    },
+  },
 });
 
 export const directoryLayout = style({

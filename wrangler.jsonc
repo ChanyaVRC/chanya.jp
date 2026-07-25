@@ -1,21 +1,42 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "chanya-jp",
-  "main": "./src/index.tsx",
-  "compatibility_date": "2026-07-25",
-  "workers_dev": true,
-  "preview_urls": true,
-  "routes": [
-    {
-      "pattern": "chanya.jp/*",
-      "zone_name": "chanya.jp"
-    }
-  ],
-  "observability": {
-    "enabled": true,
-    "logs": {
-      "enabled": true,
-      "invocation_logs": true
-    }
-  }
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "chanya-jp",
+	"main": "./src/index.tsx",
+	"compatibility_date": "2026-07-25",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"workers_dev": false,
+	"preview_urls": false,
+	"routes": [
+		{
+			"pattern": "chanya.jp/*",
+			"zone_name": "chanya.jp"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "GALLERY_BUCKET",
+			"bucket_name": "chanya-gallery"
+		}
+	],
+	"images": {
+		"binding": "IMAGES"
+	},
+	"vars": {
+		"CF_ACCESS_TEAM_DOMAIN": "https://chanyakushima.cloudflareaccess.com",
+		"CF_ACCESS_AUD": "08f4b21524ee5e79efaaa746e84959d1270a483459856b45c9aeb180e4c0941c"
+	},
+	"secrets": {
+		"required": [
+			"GALLERY_ADMIN_EMAIL"
+		]
+	},
+	"observability": {
+		"enabled": true,
+		"logs": {
+			"enabled": true,
+			"invocation_logs": true
+		}
+	}
 }

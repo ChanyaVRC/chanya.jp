@@ -1,8 +1,12 @@
 import type { FC } from "hono/jsx";
 import { externalLinks, projects, site } from "./data/site";
-import { galleryItems } from "./data/gallery";
+import {
+  seedGalleryManifest,
+  type GalleryManifest,
+  type GalleryManifestItem,
+} from "./gallery/manifest";
 import { buildRuntimeDocument, runtimeInitialSource } from "./runtime-policy";
-import type { GalleryItem, Project } from "./types";
+import type { Project } from "./types";
 import * as styles from "./styles/site.css";
 
 const externalAttributes = {
@@ -53,36 +57,76 @@ const ProjectRecord: FC<{
   </article>
 );
 
-function gallerySource(item: GalleryItem, width: 640 | 1280, format: "avif" | "webp") {
-  return `/media/gallery/${item.id}-${width}.${format}`;
+function gallerySource(
+  item: GalleryManifestItem,
+  width: 640 | 1280 | 1920,
+  format: "avif" | "webp",
+  admin: boolean,
+) {
+  if (item.source.kind === "static") {
+    return `/media/gallery/${item.source.id}-${width === 1920 ? 1280 : width}.${format}`;
+  }
+
+  const prefix = admin ? "/admin/gallery/media" : "/media/gallery-managed";
+  return `${prefix}/${encodeURIComponent(item.source.key)}/${String(width)}.${format}`;
+}
+
+function gallerySrcset(
+  item: GalleryManifestItem,
+  format: "avif" | "webp",
+  admin: boolean,
+): string {
+  const widths: readonly (640 | 1280 | 1920)[] =
+    item.source.kind === "managed" ? [640, 1280, 1920] : [640, 1280];
+
+  return widths
+    .map((width) => `${gallerySource(item, width, format, admin)} ${String(width)}w`)
+    .join(", ");
+}
+
+function gallerySizes(item: GalleryManifestItem): string {
+  if (item.layout === "feature") {
+    return "(min-width: 76rem) 72rem, 100vw";
+  }
+  if (item.layout === "wide") {
+    return "(min-width: 76rem) 48rem, (min-width: 60rem) 66vw, 100vw";
+  }
+
+  return "(min-width: 76rem) 24rem, (min-width: 60rem) 33vw, (min-width: 40rem) 50vw, 100vw";
 }
 
 const GalleryPicture: FC<{
-  readonly item: GalleryItem;
+  readonly item: GalleryManifestItem;
   readonly priority: boolean;
-}> = ({ item, priority }) => (
+  readonly admin: boolean;
+}> = ({ item, priority, admin }) => (
   <picture>
     <source
       type="image/avif"
-      srcset={`${gallerySource(item, 640, "avif")} 640w, ${gallerySource(item, 1280, "avif")} 1280w`}
-      sizes="(min-width: 60rem) 33vw, (min-width: 40rem) 50vw, 100vw"
+      srcset={gallerySrcset(item, "avif", admin)}
+      sizes={gallerySizes(item)}
     />
     <source
       type="image/webp"
-      srcset={`${gallerySource(item, 640, "webp")} 640w, ${gallerySource(item, 1280, "webp")} 1280w`}
-      sizes="(min-width: 60rem) 33vw, (min-width: 40rem) 50vw, 100vw"
+      srcset={gallerySrcset(item, "webp", admin)}
+      sizes={gallerySizes(item)}
     />
     <img
-      src={gallerySource(item, 640, "webp")}
+      src={gallerySource(item, 640, "webp", admin)}
       alt={item.alt}
       width={item.width}
       height={item.height}
       loading={priority ? "eager" : "lazy"}
       fetchpriority={priority ? "high" : "auto"}
       decoding="async"
+      style={{
+        objectPosition: `${String(item.focalPoint.x * 100)}% ${String(item.focalPoint.y * 100)}%`,
+      }}
     />
   </picture>
 );
+
+const initialGalleryManifest = seedGalleryManifest();
 
 export const HomePage: FC = () => (
   <>
@@ -163,7 +207,11 @@ avatar.Parameters["Wave"] = true;`}</code>
       aria-labelledby="gallery-preview-title"
     >
       <figure class={styles.featureImage}>
-        <GalleryPicture item={galleryItems[0]!} priority={false} />
+        <GalleryPicture
+          item={initialGalleryManifest.items[0]!}
+          priority={false}
+          admin={false}
+        />
       </figure>
       <div class={styles.splitCopy}>
         <h2 id="gallery-preview-title">Nankotsu</h2>
@@ -272,80 +320,364 @@ avatar.Parameters["BoolParameterName"] = true;`}</code>
   </>
 );
 
-export const GalleryPage: FC = () => (
-  <>
-    <section class={styles.galleryMasthead} data-page-layout="gallery">
-      <div class={styles.compactHeading}>
-        <p class={styles.meta}>Gallery</p>
-        <h1>Nankotsu.</h1>
-      </div>
-      <p class={styles.galleryLede}>
-        VRChatで撮影した42枚。写真を選ぶと大きく表示します。自動では切り替わりません。
-      </p>
-      <dl class={styles.galleryFacts}>
-        <div>
-          <dt>Works</dt>
-          <dd>42</dd>
-        </div>
-        <div>
-          <dt>Captured</dt>
-          <dd>2020</dd>
-        </div>
-      </dl>
-    </section>
+function galleryLayoutClass(item: GalleryManifestItem): string {
+  if (item.layout === "feature") {
+    return styles.galleryItemFeature;
+  }
 
-    <section
-      class={styles.galleryGrid}
-      aria-label="Nankotsuギャラリー"
-      data-primary-content
-    >
-      {galleryItems.map((item, index) => (
-        <figure class={styles.galleryItem}>
-          <button
-            class={styles.galleryButton}
-            type="button"
-            aria-label={`${item.title}を拡大`}
-            data-gallery-open
-            data-gallery-src={gallerySource(item, 1280, "webp")}
-            data-gallery-alt={item.alt}
-            data-gallery-title={item.title}
-            data-gallery-date={item.date ?? ""}
+  return item.layout === "wide" ? styles.galleryItemWide : "";
+}
+
+function galleryCapturedLabel(items: readonly GalleryManifestItem[]): string {
+  const years = Array.from(
+    new Set(
+      items
+        .map((item) => item.date?.slice(0, 4))
+        .filter((year): year is string => Boolean(year)),
+    ),
+  ).sort();
+
+  if (years.length === 0) {
+    return "—";
+  }
+
+  return years.length === 1 ? years[0]! : `${years[0]}–${years.at(-1)}`;
+}
+
+interface GalleryCanvasProps {
+  readonly manifest: GalleryManifest;
+  readonly mode?: "view" | "editor";
+}
+
+export const GalleryCanvas: FC<GalleryCanvasProps> = ({
+  manifest,
+  mode = "view",
+}) => {
+  const editor = mode === "editor";
+  const firstItem = manifest.items[0] ?? initialGalleryManifest.items[0]!;
+
+  return (
+    <>
+      <section class={styles.galleryMasthead} data-page-layout="gallery">
+        <div class={styles.compactHeading}>
+          <p class={styles.meta}>Gallery</p>
+          <h1>Nankotsu.</h1>
+        </div>
+        <p class={styles.galleryLede}>
+          VRChatで撮影した{String(manifest.items.length)}枚。写真を選ぶと大きく表示します。
+          自動では切り替わりません。
+        </p>
+        <dl class={styles.galleryFacts}>
+          <div>
+            <dt>Works</dt>
+            <dd data-gallery-count>{String(manifest.items.length)}</dd>
+          </div>
+          <div>
+            <dt>Captured</dt>
+            <dd data-gallery-years>{galleryCapturedLabel(manifest.items)}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section
+        class={styles.galleryGrid}
+        aria-label={editor ? "Nankotsuギャラリー編集キャンバス" : "Nankotsuギャラリー"}
+        data-gallery-grid
+        data-primary-content
+      >
+        {manifest.items.map((item, index) => (
+          <figure
+            class={`${styles.galleryItem} ${galleryLayoutClass(item)} ${editor ? styles.galleryEditable : ""}`}
+            data-gallery-id={item.id}
+            data-layout={item.layout}
           >
-            <GalleryPicture item={item} priority={index === 0} />
+            <button
+              class={`${styles.galleryButton} ${editor ? styles.galleryEditorButton : ""}`}
+              type="button"
+              aria-label={editor ? `${item.title}を編集` : `${item.title}を拡大`}
+              aria-pressed={editor ? "false" : undefined}
+              draggable={editor}
+              data-gallery-open={editor ? undefined : ""}
+              data-gallery-select={editor ? "" : undefined}
+              data-gallery-src={gallerySource(item, 1920, "webp", editor)}
+              data-gallery-alt={item.alt}
+              data-gallery-title={item.title}
+              data-gallery-date={item.date ?? ""}
+              data-gallery-width={String(item.width)}
+              data-gallery-height={String(item.height)}
+            >
+              {editor ? (
+                <span class={styles.galleryOrderBadge} aria-hidden="true">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+              ) : null}
+              <GalleryPicture
+                item={item}
+                priority={index === 0}
+                admin={editor}
+              />
+            </button>
+            <figcaption>
+              <span data-gallery-caption-title>{item.title}</span>
+              {item.date ? (
+                <time datetime={item.date} data-gallery-caption-date>
+                  {item.date}
+                </time>
+              ) : (
+                <time hidden data-gallery-caption-date />
+              )}
+            </figcaption>
+          </figure>
+        ))}
+      </section>
+
+      <dialog
+        class={styles.lightboxDialog}
+        aria-labelledby="lightbox-title"
+        data-lightbox
+      >
+        <div class={styles.lightboxTopbar}>
+          <div>
+            <strong id="lightbox-title" data-lightbox-title>
+              Nankotsu
+            </strong>
+            <span data-lightbox-date />
+          </div>
+          <button type="button" data-lightbox-close>
+            Close
           </button>
-          <figcaption>
-            <span>{item.title}</span>
-            {item.date ? <time datetime={item.date}>{item.date}</time> : null}
-          </figcaption>
-        </figure>
-      ))}
+        </div>
+        <img
+          src={gallerySource(firstItem, 1920, "webp", editor)}
+          alt={firstItem.alt}
+          width={String(firstItem.width)}
+          height={String(firstItem.height)}
+          data-lightbox-image
+        />
+      </dialog>
+    </>
+  );
+};
+
+export const GalleryPage: FC<{ readonly manifest?: GalleryManifest }> = ({
+  manifest = initialGalleryManifest,
+}) => <GalleryCanvas manifest={manifest} />;
+
+interface AdminGalleryPageProps {
+  readonly manifest: GalleryManifest;
+  readonly actor: string;
+  readonly csrfToken: string;
+}
+
+function serialiseBootstrap(value: object): string {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+}
+
+export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
+  manifest,
+  actor,
+  csrfToken,
+}) => (
+  <div
+    data-gallery-admin
+    data-preview="false"
+    data-manifest-version={String(manifest.version)}
+  >
+    <section class={styles.adminToolbar} aria-label="ギャラリー管理">
+      <div class={styles.adminToolbarInner}>
+        <div class={styles.adminIdentity}>
+          <strong>Gallery Workbench</strong>
+          <span>GitHub Access · {actor}</span>
+        </div>
+        <div class={styles.adminToolbarActions} data-gallery-toolbar-actions>
+          <span
+            class={styles.adminStatus}
+            data-gallery-status
+            data-state="saved"
+            role="status"
+            aria-live="polite"
+          >
+            下書きは同期済み
+          </span>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-gallery-import
+          >
+            フォルダを選ぶ
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-gallery-undo
+            disabled
+          >
+            元に戻す
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
+            aria-pressed="false"
+            data-gallery-preview
+          >
+            表示だけ
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-gallery-save
+          >
+            下書き保存
+          </button>
+          <button
+            class={styles.adminPrimaryButton}
+            type="button"
+            data-gallery-publish
+          >
+            公開する
+          </button>
+          <a
+            class={styles.adminButton}
+            href="/cdn-cgi/access/logout"
+            data-gallery-logout
+          >
+            ログアウト
+          </a>
+        </div>
+      </div>
     </section>
 
-    <dialog
-      class={styles.lightboxDialog}
-      aria-labelledby="lightbox-title"
-      data-lightbox
+    <input
+      class={styles.srOnly}
+      type="file"
+      accept="image/jpeg,image/png,image/webp"
+      aria-label="VRChat画像フォルダ"
+      multiple
+      webkitdirectory
+      data-gallery-folder-input
+    />
+
+    <GalleryCanvas manifest={manifest} mode="editor" />
+
+    <aside
+      class={styles.adminInspector}
+      data-gallery-inspector
+      data-open="false"
+      aria-hidden="true"
+      aria-label="写真の編集"
     >
-      <div class={styles.lightboxTopbar}>
+      <header class={styles.adminInspectorHeader}>
         <div>
-          <strong id="lightbox-title" data-lightbox-title>
-            Nankotsu
-          </strong>
-          <span data-lightbox-date />
+          <strong data-inspector-title>写真を選択</strong>
+          <span data-inspector-position>— / {String(manifest.items.length)}</span>
         </div>
-        <button type="button" data-lightbox-close>
-          Close
+        <button
+          class={styles.adminButton}
+          type="button"
+          data-inspector-close
+        >
+          閉じる
         </button>
+      </header>
+      <div class={styles.adminInspectorBody}>
+        <label class={styles.adminField}>
+          タイトル
+          <input
+            type="text"
+            maxLength={120}
+            autoComplete="off"
+            data-inspector-input="title"
+          />
+        </label>
+        <label class={styles.adminField}>
+          撮影日
+          <input type="date" data-inspector-input="date" />
+        </label>
+        <label class={styles.adminField}>
+          代替テキスト
+          <textarea
+            maxLength={300}
+            rows={4}
+            data-inspector-input="alt"
+          />
+        </label>
+        <label class={styles.adminField}>
+          表示サイズ
+          <select data-inspector-input="layout">
+            <option value="standard">標準</option>
+            <option value="wide">横長</option>
+            <option value="feature">大きく見せる</option>
+          </select>
+        </label>
+        <div class={styles.adminFieldRow}>
+          <label class={styles.adminField}>
+            焦点・横
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              data-inspector-input="focal-x"
+            />
+          </label>
+          <label class={styles.adminField}>
+            焦点・縦
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              data-inspector-input="focal-y"
+            />
+          </label>
+        </div>
+        <div class={styles.adminInspectorActions}>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-gallery-move="-1"
+          >
+            前へ移動
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-gallery-move="1"
+          >
+            後へ移動
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
+            data-gallery-remove
+          >
+            下書きから外す
+          </button>
+          <a class={styles.adminButton} href="/gallery/" target="_blank">
+            公開ページ
+          </a>
+        </div>
       </div>
-      <img
-        src={gallerySource(galleryItems[0]!, 1280, "webp")}
-        alt={galleryItems[0]!.alt}
-        width="1280"
-        height="720"
-        data-lightbox-image
-      />
-    </dialog>
-  </>
+    </aside>
+
+    <p
+      class={styles.adminToast}
+      data-gallery-toast
+      data-open="false"
+      role="status"
+      aria-live="polite"
+    />
+    <script
+      type="application/json"
+      data-gallery-bootstrap
+      dangerouslySetInnerHTML={{
+        __html: serialiseBootstrap({ manifest, actor, csrfToken }),
+      }}
+    />
+  </div>
 );
 
 export const ContactPage: FC = () => {

@@ -18,7 +18,10 @@ pages defer to it. Amend intentionally — this file is the rule.
 - Home · Split Studio; preserve its existing hero and page rhythm.
 - About · Long Document profile spread; portrait, identity, and facts form one composition.
 - Development · Index-First; projects are ruled records, not feature cards.
-- Gallery · Catalogue; a compact inventory masthead leads directly into 42 owned photographs.
+- Gallery · Catalogue; a compact inventory masthead leads directly into an
+  irregular, manifest-driven field of owned photographs.
+- Gallery Admin · Workbench; the public `GalleryCanvas` remains the primary
+  surface while a sticky command rail and one Inspector add editing controls.
 - Contact / Other · Index-First directory; the links are the interface.
 - RuntimeHtml · Component Playground; the live editor and preview are the primary content.
 - 404 · sparse Index-First recovery page.
@@ -69,6 +72,11 @@ or font families.
 
 - Non-home mastheads stay compact: `h1` caps at 3.25rem and content starts in the first viewport.
 - About may use one composed image/text spread; Gallery may use an irregular image grid.
+- Gallery layouts use only three authored spans: standard, wide, and feature.
+  The editor and published route render the same component, markup, focal point,
+  caption, and responsive image rules.
+- Gallery Admin keeps the canvas at the public width. Its Inspector overlays
+  from the right at desktop sizes and from the bottom on small screens.
 - Development, Contact, and Other use ruled rows rather than bordered card grids.
 - Never reuse one generic two-column intro across every route.
 - Section rhythm is intentionally uneven. Accent occupies less than 5% of a viewport.
@@ -87,8 +95,26 @@ or font families.
 
 - Content and index pages are composed and static.
 - Gallery uses one restrained image-scale affordance; RuntimeHtml uses state feedback only.
+- Gallery Admin motion is limited to three stateful actions: FLIP reorder,
+  save-status opacity, and Inspector open/close. All use transform/opacity.
 - No scroll choreography is added to non-home routes.
 - Reduced-motion fallback is an opacity-only transition of 150ms or less.
+
+## Gallery publishing model
+
+- R2 is the v1 source of truth for immutable managed originals,
+  the atomic `manifests/state.json` draft/published pair, and revision snapshots.
+- The checked-in 42 photographs remain a seed fallback and keep their existing
+  static AVIF/WebP paths. New photographs use UUID object keys.
+- Public URLs expose only Images-binding transformations; original R2 objects
+  have no route.
+- Cloudflare Access protects `/admin/gallery*` with GitHub as its only IdP;
+  the Worker also verifies issuer, audience, and the single administrator email.
+- Draft saves use a base version, mutation UUID, conditional R2 write, and a
+  canonical `409` response. Publishing updates the validated published half in
+  the same atomic state object, so a concurrent draft save cannot be skipped.
+- Removing a photograph is reversible manifest editing. This interface never
+  deletes an R2 original.
 
 ## Exports
 

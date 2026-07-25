@@ -1,6 +1,15 @@
 [
   {
     "date": "2026-07-25",
+    "macrostructure": "Workbench / Catalogue",
+    "theme": "Cobalt",
+    "enrichment": "owned VRChat photography with a shared live GalleryCanvas",
+    "nav": "N1b",
+    "footer": "Ft2",
+    "brief": "Visual-first Gallery Workbench with folder import and manifest publishing"
+  },
+  {
+    "date": "2026-07-25",
     "macrostructure": "Split Studio",
     "theme": "Cobalt",
     "enrichment": "uncropped profile icon paired directly with identity copy",
