@@ -7,5 +7,21 @@
     "nav": "N1b",
     "footer": "Ft2",
     "brief": "Chanya.jp technical and VRChat portfolio"
+  },
+  {
+    "date": "2026-07-25",
+    "macrostructure": "Multi-page system",
+    "pageFamilies": [
+      "Split Studio",
+      "Long Document",
+      "Index-First",
+      "Catalogue",
+      "Component Playground"
+    ],
+    "theme": "Cobalt",
+    "enrichment": "owned profile and gallery photography",
+    "nav": "N1b",
+    "footer": "Ft2",
+    "brief": "Chanya.jp non-home layout redesign"
   }
 ]

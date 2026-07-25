@@ -1,4 +1,4 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Split Studio · theme: Cobalt · enrichment: existing profile photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
 import { createGlobalTheme, globalStyle, style } from "@vanilla-extract/css";
 import { designTokens, valuesOf } from "./design-tokens";
@@ -64,7 +64,7 @@ globalStyle("::selection", {
 });
 
 globalStyle("h1, h2, h3, p, figure, pre, ul, dl, dd", {
-  marginBlock: 0,
+  margin: 0,
 });
 
 globalStyle("h1, h2, h3", {
@@ -895,66 +895,86 @@ globalStyle(`${featureImage} img`, {
   objectFit: "cover",
 });
 
-export const pageIntro = style({
+export const compactHeading = style({
+  display: "grid",
+  minWidth: 0,
+  gap: vars.space[3],
+});
+
+export const aboutProfile = style({
   ...sectionPad,
   display: "grid",
   width: "100%",
   maxWidth: vars.size.content,
   marginInline: "auto",
-  paddingBlock: vars.space[16],
-  gap: vars.space[8],
-  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
-  "@media": {
-    "screen and (min-width: 48rem)": {
-      gridTemplateColumns: "minmax(0, 1.25fr) minmax(17rem, 0.75fr)",
-      alignItems: "end",
-      paddingBlock: vars.space[24],
-    },
-  },
-});
-
-globalStyle(`${pageIntro} > div`, {
-  display: "grid",
-  gap: vars.space[4],
-});
-
-globalStyle(`${pageIntro} > p`, {
-  maxWidth: "60ch",
-  color: vars.color.graphiteSoft,
-  fontSize: "1.05rem",
-});
-
-export const aboutSplit = style({
-  ...sectionPad,
-  display: "grid",
-  width: "100%",
-  maxWidth: vars.size.content,
-  marginInline: "auto",
-  paddingBlock: vars.space[12],
+  paddingBlock: `${vars.space[10]} ${vars.space[16]}`,
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gridTemplateAreas: '"lead" "portrait" "details"',
   gap: vars.space[10],
   "@media": {
     "screen and (min-width: 48rem)": {
-      gridTemplateColumns: "minmax(16rem, 0.8fr) minmax(0, 1.2fr)",
-      paddingBlock: vars.space[20],
+      gridTemplateColumns: "minmax(18rem, 0.86fr) minmax(0, 1.14fr)",
+      gridTemplateAreas: '"portrait lead" "portrait details"',
+      alignItems: "start",
+      paddingBlock: `${vars.space[12]} ${vars.space[20]}`,
+      columnGap: vars.space[12],
+      rowGap: vars.space[8],
     },
   },
 });
 
 export const aboutPortrait = style({
-  width: "min(100%, 30rem)",
+  display: "grid",
+  width: "100%",
+  maxWidth: "30rem",
+  minWidth: 0,
+  gridArea: "portrait",
+  alignSelf: "start",
+  gap: vars.space[3],
   background: vars.color.paperQuiet,
 });
 
-globalStyle(`${aboutPortrait} img`, {
+globalStyle(`${aboutPortrait} picture, ${aboutPortrait} img`, {
   width: "100%",
+});
+
+globalStyle(`${aboutPortrait} img`, {
   aspectRatio: "1",
   objectFit: "cover",
 });
 
+globalStyle(`${aboutPortrait} figcaption`, {
+  paddingInline: vars.space[1],
+  color: vars.color.graphiteSoft,
+  fontFamily: vars.font.body,
+  fontSize: "0.7rem",
+});
+
+export const aboutLead = style({
+  display: "grid",
+  minWidth: 0,
+  gridArea: "lead",
+  alignContent: "start",
+  gap: vars.space[6],
+});
+
+globalStyle(`${aboutLead} > div`, {
+  display: "grid",
+  gap: vars.space[3],
+});
+
+export const aboutStatement = style({
+  maxWidth: "46ch",
+  color: vars.color.graphiteSoft,
+  fontSize: "clamp(1.05rem, 2vw, 1.3rem)",
+});
+
 export const profileDetails = style({
   display: "grid",
+  minWidth: 0,
+  gridArea: "details",
   alignContent: "start",
-  gap: vars.space[8],
+  gap: vars.space[6],
 });
 
 globalStyle(`${profileDetails} dl`, {
@@ -986,53 +1006,112 @@ globalStyle(`${profileDetails} > p`, {
   color: vars.color.graphiteSoft,
 });
 
-export const projectGrid = style({
+export const developmentMasthead = style({
   ...sectionPad,
   display: "grid",
   width: "100%",
   maxWidth: vars.size.content,
   marginInline: "auto",
-  paddingBlock: vars.space[12],
-  gap: vars.space[4],
+  paddingBlock: `${vars.space[10]} ${vars.space[12]}`,
+  gap: vars.space[6],
+  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
   "@media": {
     "screen and (min-width: 48rem)": {
-      gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
-      paddingBlock: vars.space[20],
+      gridTemplateColumns:
+        "minmax(0, 4.5fr) minmax(17rem, 4.5fr) minmax(8rem, 1.5fr)",
+      alignItems: "end",
+      paddingBlock: `${vars.space[12]} ${vars.space[16]}`,
+      gap: vars.space[8],
     },
   },
 });
 
-export const projectCard = style({
-  display: "grid",
-  minWidth: 0,
-  padding: vars.space[6],
-  gap: vars.space[5],
-  border: `${vars.size.hairline} solid ${vars.color.line}`,
-  background: vars.color.paperRaised,
-  "@media": {
-    "screen and (min-width: 48rem)": {
-      gridColumn: "span 5",
-      selectors: {
-        "&:nth-child(3)": {
-          gridColumn: "6 / span 7",
-        },
-      },
-    },
-  },
-});
-
-globalStyle(`${projectCard} > p:not(${meta})`, {
+export const developmentLede = style({
+  maxWidth: "54ch",
   color: vars.color.graphiteSoft,
 });
 
-export const projectCardFeatured = style({
+export const projectCount = style({
+  display: "flex",
+  alignItems: "baseline",
+  gap: vars.space[3],
+  color: vars.color.graphiteSoft,
   "@media": {
     "screen and (min-width: 48rem)": {
-      gridColumn: "span 7",
-      gridRow: "span 2",
-      padding: vars.space[10],
+      display: "grid",
+      justifySelf: "end",
+      gap: 0,
     },
   },
+});
+
+globalStyle(`${projectCount} strong`, {
+  color: vars.color.graphite,
+  fontFamily: vars.font.display,
+  fontSize: "2rem",
+  fontWeight: vars.weight.medium,
+  fontVariantNumeric: "tabular-nums",
+  lineHeight: 1,
+});
+
+globalStyle(`${projectCount} span`, {
+  fontFamily: vars.font.body,
+  fontSize: "0.7rem",
+  whiteSpace: "nowrap",
+});
+
+export const projectIndex = style({
+  ...sectionPad,
+  display: "grid",
+  width: "100%",
+  maxWidth: vars.size.content,
+  marginInline: "auto",
+  paddingBlock: `${vars.space[6]} ${vars.space[16]}`,
+});
+
+export const projectRecord = style({
+  display: "grid",
+  minWidth: 0,
+  paddingBlock: vars.space[6],
+  gap: vars.space[5],
+  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
+  selectors: {
+    "&:first-child": {
+      borderTop: `${vars.size.hairline} solid ${vars.color.graphite}`,
+    },
+  },
+  "@media": {
+    "screen and (min-width: 60rem)": {
+      gridTemplateColumns:
+        "minmax(11rem, 3fr) minmax(18rem, 5fr) minmax(14rem, 4fr)",
+      alignItems: "start",
+      paddingBlock: vars.space[8],
+      gap: vars.space[8],
+    },
+  },
+});
+
+export const projectIdentity = style({
+  display: "grid",
+  minWidth: 0,
+  gap: vars.space[2],
+});
+
+globalStyle(`${projectIdentity} h2`, {
+  fontSize: "clamp(1.65rem, 3vw, 2.4rem)",
+});
+
+export const projectDescription = style({
+  maxWidth: "60ch",
+  color: vars.color.graphiteSoft,
+});
+
+export const projectDestination = style({
+  display: "grid",
+  minWidth: 0,
+  alignContent: "space-between",
+  justifyItems: "start",
+  gap: vars.space[5],
 });
 
 export const tagList = style({
@@ -1045,12 +1124,17 @@ export const tagList = style({
 });
 
 globalStyle(`${tagList} li`, {
-  padding: `${vars.space[1]} ${vars.space[2]}`,
-  border: `${vars.size.hairline} solid ${vars.color.line}`,
-  borderRadius: vars.radius.round,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: vars.space[2],
   color: vars.color.graphiteSoft,
   fontFamily: vars.font.body,
   fontSize: "0.66rem",
+});
+
+globalStyle(`${tagList} li:not(:last-child)::after`, {
+  color: vars.color.line,
+  content: '"/"',
 });
 
 export const codeBand = style({
@@ -1103,43 +1187,80 @@ export const metaOnDark = style({
   textTransform: "uppercase",
 });
 
+export const galleryMasthead = style({
+  ...sectionPad,
+  display: "grid",
+  width: "100%",
+  maxWidth: vars.size.content,
+  marginInline: "auto",
+  paddingBlock: `${vars.space[10]} ${vars.space[8]}`,
+  gap: vars.space[6],
+  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
+  "@media": {
+    "screen and (min-width: 48rem)": {
+      gridTemplateColumns:
+        "minmax(0, 5fr) minmax(17rem, 4fr) minmax(10rem, 3fr)",
+      alignItems: "end",
+      paddingBlock: `${vars.space[12]} ${vars.space[10]}`,
+      gap: vars.space[8],
+    },
+  },
+});
+
+export const galleryLede = style({
+  maxWidth: "54ch",
+  color: vars.color.graphiteSoft,
+});
+
+export const galleryFacts = style({
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  minWidth: 0,
+  borderTop: `${vars.size.hairline} solid ${vars.color.graphite}`,
+});
+
+globalStyle(`${galleryFacts} > div`, {
+  display: "grid",
+  paddingBlock: vars.space[3],
+  gap: vars.space[1],
+  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
+});
+
+globalStyle(`${galleryFacts} dt`, {
+  color: vars.color.graphiteSoft,
+  fontFamily: vars.font.body,
+  fontSize: "0.66rem",
+});
+
+globalStyle(`${galleryFacts} dd`, {
+  fontFamily: vars.font.display,
+  fontSize: "1rem",
+  fontVariantNumeric: "tabular-nums",
+});
+
 export const galleryGrid = style({
   ...sectionPad,
   display: "grid",
   width: "100%",
   maxWidth: vars.size.content,
   marginInline: "auto",
-  paddingBlock: vars.space[8],
-  gap: vars.space[6],
+  paddingBlock: `${vars.space[4]} ${vars.space[16]}`,
+  gridTemplateColumns: "minmax(0, 1fr)",
+  columnGap: vars.space[4],
+  rowGap: vars.space[8],
   "@media": {
     "screen and (min-width: 40rem)": {
       gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     },
     "screen and (min-width: 60rem)": {
-      gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
-      paddingBlock: vars.space[12],
+      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+      paddingBlockStart: vars.space[6],
     },
   },
 });
 
 export const galleryItem = style({
   minWidth: 0,
-  "@media": {
-    "screen and (min-width: 60rem)": {
-      gridColumn: "span 4",
-      selectors: {
-        "&:nth-child(9n + 1), &:nth-child(9n + 6)": {
-          gridColumn: "span 8",
-        },
-        "&:nth-child(9n + 4)": {
-          gridColumn: "3 / span 5",
-        },
-        "&:nth-child(9n + 5)": {
-          gridColumn: "8 / span 5",
-        },
-      },
-    },
-  },
 });
 
 globalStyle(`${galleryItem} figcaption`, {
@@ -1188,7 +1309,11 @@ globalStyle(`${galleryButton} img`, {
 });
 
 globalStyle(`${galleryButton}:hover img`, {
-  transform: "scale(1.015)",
+  "@media": {
+    "(hover: hover) and (pointer: fine)": {
+      transform: "scale(1.015)",
+    },
+  },
 });
 
 export const lightboxDialog = style({
@@ -1244,26 +1369,85 @@ globalStyle(`${lightboxTopbar} button`, {
   cursor: "pointer",
 });
 
-export const contactIndex = style({
+export const directoryLayout = style({
   ...sectionPad,
   display: "grid",
   width: "100%",
   maxWidth: vars.size.content,
   marginInline: "auto",
-  paddingBlock: vars.space[8],
+  paddingBlock: `${vars.space[10]} ${vars.space[16]}`,
+  gap: vars.space[12],
+  "@media": {
+    "screen and (min-width: 60rem)": {
+      gridTemplateColumns: "minmax(15rem, 4fr) minmax(0, 8fr)",
+      alignItems: "start",
+      paddingBlock: `${vars.space[12]} ${vars.space[20]}`,
+      gap: vars.space[16],
+    },
+  },
+});
+
+export const directoryHeader = style({
+  display: "grid",
+  minWidth: 0,
+  alignContent: "start",
+  gap: vars.space[6],
+  "@media": {
+    "screen and (min-width: 60rem)": {
+      position: "sticky",
+      insetBlockStart: `calc(4.5rem + ${vars.space[8]})`,
+    },
+  },
+});
+
+globalStyle(`${directoryHeader} > p`, {
+  maxWidth: "48ch",
+  color: vars.color.graphiteSoft,
+});
+
+export const directoryBody = style({
+  display: "grid",
+  minWidth: 0,
+  gap: vars.space[12],
+});
+
+export const otherDirectory = style({
+  "@media": {
+    "screen and (min-width: 48rem)": {
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      alignItems: "start",
+      columnGap: vars.space[8],
+      rowGap: vars.space[12],
+    },
+  },
+});
+
+export const directoryGroup = style({
+  display: "grid",
+  minWidth: 0,
+  alignContent: "start",
+  gap: vars.space[4],
+});
+
+globalStyle(`${directoryGroup} h2`, {
+  fontSize: "1.05rem",
+  letterSpacing: "-0.015em",
+});
+
+export const contactIndex = style({
+  display: "grid",
+  minWidth: 0,
+  borderTop: `${vars.size.hairline} solid ${vars.color.graphite}`,
 });
 
 globalStyle(`${contactIndex} > a`, {
   display: "grid",
-  gridTemplateColumns: "minmax(4rem, 0.25fr) minmax(0, 1fr) auto",
+  gridTemplateColumns: "minmax(3rem, auto) minmax(0, 1fr) auto",
   alignItems: "center",
-  minHeight: "6rem",
+  minWidth: 0,
+  minHeight: "5.25rem",
   gap: vars.space[4],
   borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
-});
-
-globalStyle(`${contactIndex} > a:first-child`, {
-  borderTop: `${vars.size.hairline} solid ${vars.color.graphite}`,
 });
 
 globalStyle(`${contactIndex} > a > span:first-child`, {
@@ -1273,21 +1457,11 @@ globalStyle(`${contactIndex} > a > span:first-child`, {
 });
 
 globalStyle(`${contactIndex} strong`, {
+  minWidth: 0,
   overflowWrap: "anywhere",
   fontFamily: vars.font.display,
-  fontSize: "clamp(1.1rem, 4vw, 2.75rem)",
-});
-
-export const linkSection = style({
-  ...sectionPad,
-  width: "100%",
-  maxWidth: vars.size.content,
-  marginInline: "auto",
-  paddingBlock: vars.space[12],
-});
-
-globalStyle(`${linkSection} h2`, {
-  marginBlockEnd: vars.space[8],
+  fontSize: "clamp(1rem, 4.5vw, 1.75rem)",
+  whiteSpace: "nowrap",
 });
 
 export const linkIndex = style({
@@ -1305,7 +1479,8 @@ globalStyle(`${linkIndex} a`, {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  minHeight: "5.25rem",
+  minWidth: 0,
+  minHeight: "4.75rem",
   paddingBlock: vars.space[3],
   gap: vars.space[5],
 });
@@ -1318,27 +1493,79 @@ globalStyle(`${linkIndex} a > span:first-child`, {
 globalStyle(`${linkIndex} strong`, {
   fontFamily: vars.font.display,
   fontSize: "1.15rem",
+  whiteSpace: "nowrap",
 });
 
 globalStyle(`${linkIndex} small`, {
   color: vars.color.graphiteSoft,
 });
 
-export const toolIntro = pageIntro;
+export const toolMasthead = style({
+  ...sectionPad,
+  display: "grid",
+  width: "100%",
+  maxWidth: vars.size.content,
+  marginInline: "auto",
+  paddingBlock: `${vars.space[8]} ${vars.space[6]}`,
+  gap: vars.space[5],
+  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
+  "@media": {
+    "screen and (min-width: 48rem)": {
+      gridTemplateColumns:
+        "minmax(0, 5fr) minmax(17rem, 4fr) minmax(10rem, 3fr)",
+      alignItems: "end",
+      paddingBlock: `${vars.space[10]} ${vars.space[8]}`,
+      gap: vars.space[8],
+    },
+  },
+});
+
+globalStyle(`${toolMasthead} h1`, {
+  fontSize: "clamp(1.85rem, 4vw, 3rem)",
+});
+
+export const toolLede = style({
+  maxWidth: "56ch",
+  color: vars.color.graphiteSoft,
+});
+
+export const toolFacts = style({
+  display: "grid",
+  minWidth: 0,
+  borderTop: `${vars.size.hairline} solid ${vars.color.graphite}`,
+});
+
+globalStyle(`${toolFacts} > div`, {
+  display: "grid",
+  gridTemplateColumns: "minmax(5rem, 0.45fr) minmax(0, 1fr)",
+  paddingBlock: vars.space[2],
+  gap: vars.space[3],
+  borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
+});
+
+globalStyle(`${toolFacts} dt`, {
+  color: vars.color.graphiteSoft,
+  fontSize: "0.66rem",
+});
+
+globalStyle(`${toolFacts} dd`, {
+  fontFamily: vars.font.body,
+  fontSize: "0.72rem",
+});
 
 export const runtimeGrid = style({
   ...sectionPad,
   display: "grid",
   width: "100%",
   maxWidth: vars.size.content,
-  minHeight: "42rem",
   marginInline: "auto",
-  paddingBlock: vars.space[6],
-  gap: vars.space[4],
+  paddingBlock: vars.space[4],
+  gap: vars.space[3],
   "@media": {
     "screen and (min-width: 60rem)": {
       gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-      paddingBlock: vars.space[8],
+      minHeight: "38rem",
+      paddingBlock: vars.space[6],
     },
   },
 });
@@ -1346,8 +1573,8 @@ export const runtimeGrid = style({
 export const editorPane = style({
   display: "grid",
   minWidth: 0,
-  minHeight: "32rem",
-  gridTemplateRows: "auto minmax(20rem, 1fr) auto",
+  minHeight: "27rem",
+  gridTemplateRows: "auto minmax(18rem, 1fr) auto",
   border: `${vars.size.hairline} solid ${vars.color.line}`,
   background: vars.color.paperRaised,
 });
@@ -1357,7 +1584,7 @@ export const toolBar = style({
   flexWrap: "wrap",
   alignItems: "center",
   justifyContent: "space-between",
-  minHeight: "4rem",
+  minHeight: "3.5rem",
   padding: vars.space[2],
   gap: vars.space[2],
   borderBottom: `${vars.size.hairline} solid ${vars.color.line}`,
@@ -1421,8 +1648,8 @@ export const toolStatus = style({
 export const previewPane = style({
   display: "grid",
   minWidth: 0,
-  minHeight: "32rem",
-  gridTemplateRows: "4rem minmax(0, 1fr)",
+  minHeight: "27rem",
+  gridTemplateRows: "3.5rem minmax(0, 1fr)",
   border: `${vars.size.hairline} solid ${vars.color.line}`,
   background: vars.color.paperRaised,
 });
@@ -1440,7 +1667,7 @@ globalStyle(`${previewPane} > p`, {
 globalStyle(`${previewPane} iframe`, {
   width: "100%",
   height: "100%",
-  minHeight: "28rem",
+  minHeight: "23.5rem",
   border: 0,
   background: vars.color.paperRaised,
 });
@@ -1451,12 +1678,19 @@ export const securityNote = style({
   width: "100%",
   maxWidth: vars.size.content,
   marginInline: "auto",
-  paddingBlock: `${vars.space[8]} ${vars.space[16]}`,
-  gap: vars.space[4],
+  paddingBlock: `${vars.space[6]} ${vars.space[16]}`,
+  gap: vars.space[3],
+  borderTop: `${vars.size.hairline} solid ${vars.color.line}`,
+  "@media": {
+    "screen and (min-width: 48rem)": {
+      gridTemplateColumns: "minmax(12rem, 0.6fr) minmax(0, 1.4fr)",
+      gap: vars.space[8],
+    },
+  },
 });
 
 globalStyle(`${securityNote} h2`, {
-  fontSize: "1.5rem",
+  fontSize: "1.2rem",
 });
 
 globalStyle(`${securityNote} p`, {
@@ -1467,14 +1701,30 @@ globalStyle(`${securityNote} p`, {
 export const notFound = style({
   ...sectionPad,
   display: "grid",
-  placeContent: "center start",
+  width: "100%",
+  maxWidth: vars.size.content,
   minHeight: "calc(100svh - 10.5rem)",
+  marginInline: "auto",
+  alignItems: "center",
+  paddingBlock: vars.space[12],
+});
+
+globalStyle(`${notFound} > div`, {
+  display: "grid",
+  width: "100%",
+  maxWidth: "42rem",
+  justifyItems: "start",
   gap: vars.space[6],
 });
 
-globalStyle(`${notFound} p`, {
+globalStyle(`${notFound} > div > p:not(${meta})`, {
   maxWidth: vars.size.reading,
   color: vars.color.graphiteSoft,
+});
+
+globalStyle(`${notFound} a`, {
+  width: "fit-content",
+  minWidth: "11rem",
 });
 
 globalStyle("html", {
