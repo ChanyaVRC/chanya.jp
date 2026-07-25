@@ -100,9 +100,13 @@ const GalleryPicture: FC<{
 export const HomePage: FC = () => (
   <>
     <section class={styles.heroSplit} aria-labelledby="home-title">
-      <div class={styles.heroCopy} data-reveal>
+      <div class={styles.heroCopy} data-home-copy data-reveal>
         <p class={styles.meta}>Chanya Kushima · Japan</p>
-        <h1 id="home-title">{site.tagline}</h1>
+        <h1 id="home-title" aria-label={site.tagline}>
+          {site.taglineLines.map((line) => (
+            <span>{line}</span>
+          ))}
+        </h1>
         <p class={styles.heroLede}>
           九島茶にゃの開発、VRChat、写真。作ったものと、見つけた景色を同じ場所に置いています。
         </p>
@@ -118,7 +122,7 @@ export const HomePage: FC = () => (
 
       <div class={styles.heroProof} data-reveal>
         <ProfileCode />
-        <figure class={styles.profileFigure}>
+        <figure class={styles.profileFigure} data-profile-photo>
           <ProfilePicture priority />
           <figcaption>
             <strong>九島茶にゃ</strong>

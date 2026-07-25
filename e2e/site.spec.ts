@@ -115,6 +115,7 @@ test("profile code is complete, highlighted and visible in the first viewport", 
     { width: 375, height: 812 },
     { width: 414, height: 896 },
     { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
     { width: 1280, height: 800 },
     { width: 1440, height: 900 },
   ] as const;
@@ -126,24 +127,61 @@ test("profile code is complete, highlighted and visible in the first viewport", 
 
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
 
     const codeFigure = page.locator("[data-profile-code]");
     await expect(codeFigure).toBeVisible();
-    const result = await codeFigure.evaluate((figure) => {
+    const result = await page.evaluate(() => {
+      const figure = document.querySelector<HTMLElement>("[data-profile-code]");
+      const copy = document.querySelector<HTMLElement>("[data-home-copy]");
+      const photo = document.querySelector<HTMLElement>("[data-profile-photo]");
+      if (!(figure && copy && photo)) {
+        throw new Error("home hero geometry hooks are missing");
+      }
+
       const pre = figure.querySelector("pre");
       if (!(pre instanceof HTMLElement)) {
         throw new Error("profile code pre is missing");
       }
 
       const bounds = figure.getBoundingClientRect();
+      const copyBounds = copy.getBoundingClientRect();
+      const photoBounds = photo.getBoundingClientRect();
+      const overlapWidth = Math.max(
+        0,
+        Math.min(bounds.right, photoBounds.right) -
+          Math.max(bounds.left, photoBounds.left),
+      );
+      const overlapHeight = Math.max(
+        0,
+        Math.min(bounds.bottom, photoBounds.bottom) -
+          Math.max(bounds.top, photoBounds.top),
+      );
       const syntaxKinds = [
         ...figure.querySelectorAll<HTMLElement>("[data-syntax]"),
       ].map((token) => token.dataset.syntax);
 
       return {
-        top: bounds.top,
-        bottom: bounds.bottom,
+        code: {
+          top: bounds.top,
+          right: bounds.right,
+          bottom: bounds.bottom,
+          left: bounds.left,
+        },
+        copy: {
+          top: copyBounds.top,
+          right: copyBounds.right,
+          bottom: copyBounds.bottom,
+          left: copyBounds.left,
+        },
+        photo: {
+          top: photoBounds.top,
+          right: photoBounds.right,
+          bottom: photoBounds.bottom,
+          left: photoBounds.left,
+        },
+        intersectionArea: overlapWidth * overlapHeight,
         viewportHeight: window.innerHeight,
         clientWidth: pre.clientWidth,
         scrollWidth: pre.scrollWidth,
@@ -153,13 +191,17 @@ test("profile code is complete, highlighted and visible in the first viewport", 
     });
 
     expect(
-      result.top,
+      result.code.top,
       `profile code starts above the viewport at ${String(viewport.width)}px`,
     ).toBeGreaterThanOrEqual(-1);
     expect(
-      result.bottom,
+      result.code.bottom,
       `profile code falls below the first viewport at ${String(viewport.width)}px`,
     ).toBeLessThanOrEqual(result.viewportHeight + 1);
+    expect(
+      result.intersectionArea,
+      `profile code overlaps the photo at ${String(viewport.width)}px`,
+    ).toBeLessThanOrEqual(1);
     expect(
       result.scrollWidth,
       `profile code scrolls horizontally at ${String(viewport.width)}px`,
@@ -172,6 +214,30 @@ test("profile code is complete, highlighted and visible in the first viewport", 
       "string",
       "type",
     ]);
+
+    if (viewport.width <= 768) {
+      expect(
+        result.code.top - result.copy.bottom,
+        `copy and profile code are cramped at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(12);
+      expect(
+        result.photo.top - result.code.bottom,
+        `profile code and photo are cramped at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(12);
+    } else {
+      expect(
+        result.code.top - result.photo.bottom,
+        `photo and profile code are cramped at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(12);
+      expect(
+        Math.abs(result.code.left - result.photo.left),
+        `profile code and photo left edges differ at ${String(viewport.width)}px`,
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(result.code.right - result.photo.right),
+        `profile code and photo right edges differ at ${String(viewport.width)}px`,
+      ).toBeLessThanOrEqual(1);
+    }
   }
 });
 

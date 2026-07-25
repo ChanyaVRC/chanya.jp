@@ -1,5 +1,5 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
+/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 import { createGlobalTheme, globalStyle, style } from "@vanilla-extract/css";
 import { designTokens, valuesOf } from "./design-tokens";
 
@@ -578,9 +578,10 @@ export const heroSplit = style({
   gap: vars.space[8],
   alignItems: "start",
   "@media": {
-    "screen and (min-width: 48rem)": {
+    "screen and (min-width: 60rem)": {
       gridTemplateColumns: "minmax(0, 1.05fr) minmax(20rem, 0.95fr)",
       minHeight: "calc(100svh - 4.5rem)",
+      paddingInline: vars.space[8],
       paddingBlockStart: vars.space[16],
       paddingBlockEnd: vars.space[24],
       gap: vars.space[12],
@@ -597,7 +598,11 @@ export const heroCopy = style({
 
 globalStyle(`${heroCopy} h1`, {
   maxWidth: "10ch",
-  fontSize: "clamp(2.75rem, 10vw, 7rem)",
+  fontSize: "clamp(2.75rem, 7vw, 5.5rem)",
+});
+
+globalStyle(`${heroCopy} h1 span`, {
+  display: "block",
 });
 
 export const heroLede = style({
@@ -669,17 +674,20 @@ export const secondaryButton = style({
 export const heroProof = style({
   position: "relative",
   display: "grid",
+  gridTemplateAreas: '"code" "profile"',
   gridTemplateColumns: "minmax(0, 1fr)",
   gap: vars.space[4],
   minWidth: 0,
   "@media": {
-    "screen and (min-width: 48rem)": {
-      display: "block",
+    "screen and (min-width: 60rem)": {
+      gridTemplateAreas: '"profile" "code"',
+      alignContent: "center",
     },
   },
 });
 
 export const profileFigure = style({
+  gridArea: "profile",
   minWidth: 0,
 });
 
@@ -687,12 +695,18 @@ globalStyle(`${profileFigure} picture`, {
   aspectRatio: "1",
   overflow: "hidden",
   background: vars.color.paperQuiet,
+  "@media": {
+    "screen and (min-width: 60rem)": {
+      aspectRatio: "3 / 2",
+    },
+  },
 });
 
 globalStyle(`${profileFigure} img`, {
   width: "100%",
   height: "100%",
   objectFit: "cover",
+  objectPosition: "center 48%",
 });
 
 globalStyle(`${profileFigure} figcaption`, {
@@ -709,20 +723,19 @@ globalStyle(`${profileFigure} figcaption span`, {
 });
 
 export const codeFigure = style({
+  gridArea: "code",
   position: "relative",
-  zIndex: 1,
   width: "100%",
   minWidth: 0,
-  padding: vars.space[4],
-  border: `${vars.size.hairline} solid ${vars.color.graphite}`,
-  background: vars.color.paperRaised,
-  boxShadow: vars.shadow.raised,
+  paddingBlock: vars.space[3],
+  borderBlock: `${vars.size.hairline} solid ${vars.color.line}`,
   "@media": {
-    "screen and (min-width: 48rem)": {
-      position: "absolute",
-      insetInlineStart: 0,
-      insetBlockEnd: vars.space[8],
-      width: "min(22rem, 78%)",
+    "screen and (min-width: 60rem)": {
+      display: "grid",
+      gridTemplateColumns: "auto minmax(0, 1fr)",
+      alignItems: "start",
+      columnGap: vars.space[6],
+      paddingInline: vars.space[2],
     },
   },
 });
@@ -731,13 +744,19 @@ globalStyle(`${codeFigure} figcaption`, {
   marginBlockEnd: vars.space[3],
   color: vars.color.graphiteSoft,
   fontFamily: vars.font.mono,
-  fontSize: "0.66rem",
+  fontSize: "0.75rem",
+  "@media": {
+    "screen and (min-width: 60rem)": {
+      marginBlockEnd: 0,
+      paddingBlockStart: vars.space[1],
+    },
+  },
 });
 
 globalStyle(`${codeFigure} pre`, {
   overflowX: "auto",
-  fontSize: "clamp(0.7rem, 1.2vw, 0.82rem)",
-  lineHeight: 1.65,
+  fontSize: "0.875rem",
+  lineHeight: 1.55,
   tabSize: 2,
 });
 
