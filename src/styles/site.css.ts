@@ -1,4 +1,4 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · home variation: copy + code / uncropped icon · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Component Playground) · home variation: identity copy / uncropped icon · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
 import { createGlobalTheme, globalStyle, style } from "@vanilla-extract/css";
 import { designTokens, valuesOf } from "./design-tokens";
@@ -570,7 +570,7 @@ export const meta = style({
 export const heroSplit = style({
   ...sectionPad,
   display: "grid",
-  gridTemplateAreas: '"copy" "code" "profile"',
+  gridTemplateAreas: '"copy" "profile"',
   gridTemplateColumns: "minmax(0, 1fr)",
   width: "100%",
   maxWidth: vars.size.content,
@@ -581,15 +581,15 @@ export const heroSplit = style({
   alignItems: "start",
   "@media": {
     "screen and (min-width: 60rem)": {
-      gridTemplateAreas: '"copy profile" "code profile"',
+      gridTemplateAreas: '"copy profile"',
       gridTemplateColumns: "minmax(0, 7fr) minmax(20rem, 5fr)",
       minHeight: "calc(100svh - 4.5rem)",
       paddingInline: vars.space[8],
       paddingBlockStart: vars.space[16],
       paddingBlockEnd: vars.space[24],
       columnGap: vars.space[12],
-      rowGap: vars.space[8],
       alignContent: "center",
+      alignItems: "center",
     },
   },
 });
@@ -711,63 +711,6 @@ globalStyle(`${profileFigure} figcaption`, {
 });
 
 globalStyle(`${profileFigure} figcaption span`, {
-  color: vars.color.graphiteSoft,
-});
-
-export const codeFigure = style({
-  gridArea: "code",
-  position: "relative",
-  width: "100%",
-  minWidth: 0,
-  paddingBlock: vars.space[3],
-  borderBlock: `${vars.size.hairline} solid ${vars.color.line}`,
-  "@media": {
-    "screen and (min-width: 60rem)": {
-      display: "grid",
-      gridTemplateColumns: "auto minmax(0, 1fr)",
-      alignItems: "start",
-      columnGap: vars.space[6],
-      paddingInline: vars.space[2],
-    },
-  },
-});
-
-globalStyle(`${codeFigure} figcaption`, {
-  marginBlockEnd: vars.space[3],
-  color: vars.color.graphiteSoft,
-  fontFamily: vars.font.mono,
-  fontSize: "0.75rem",
-  "@media": {
-    "screen and (min-width: 60rem)": {
-      marginBlockEnd: 0,
-      paddingBlockStart: vars.space[1],
-    },
-  },
-});
-
-globalStyle(`${codeFigure} pre`, {
-  overflowX: "auto",
-  fontSize: "0.875rem",
-  lineHeight: 1.55,
-  tabSize: 2,
-});
-
-globalStyle(`${codeFigure} [data-syntax="keyword"]`, {
-  color: vars.color.cobaltDark,
-  fontWeight: vars.weight.bold,
-});
-
-globalStyle(`${codeFigure} [data-syntax="type"]`, {
-  color: vars.color.graphite,
-  fontWeight: vars.weight.semibold,
-});
-
-globalStyle(`${codeFigure} [data-syntax="property"]`, {
-  color: vars.color.graphiteSoft,
-  fontWeight: vars.weight.medium,
-});
-
-globalStyle(`${codeFigure} [data-syntax="string"]`, {
   color: vars.color.cobaltDark,
 });
 

@@ -27,19 +27,6 @@ const ProfilePicture: FC<{ readonly priority?: boolean }> = ({ priority }) => (
   </picture>
 );
 
-const ProfileCode: FC = () => (
-  <figure class={styles.codeFigure} data-profile-code data-reveal>
-    <figcaption>profile.ts</figcaption>
-    <pre tabindex={0} aria-label="profile.ts のTypeScriptコード">
-      <code><span data-syntax="keyword">type</span>{" "}<span data-syntax="type">Chanya</span>{` = {
-  `}<span data-syntax="property">name</span>{`: `}<span data-syntax="string">"九島茶にゃ"</span>{`;
-  `}<span data-syntax="property">role</span>{`: `}<span data-syntax="string">"多分技術者"</span>{`;
-  `}<span data-syntax="property">location</span>{`: `}<span data-syntax="string">"Japan"</span>{`;
-};`}</code>
-    </pre>
-  </figure>
-);
-
 const ProjectRecord: FC<{
   readonly project: Project;
 }> = ({ project }) => (
@@ -120,8 +107,6 @@ export const HomePage: FC = () => (
         </div>
       </div>
 
-      <ProfileCode />
-
       <figure
         class={styles.profileFigure}
         data-profile-photo
@@ -130,7 +115,7 @@ export const HomePage: FC = () => (
         <ProfilePicture priority />
         <figcaption>
           <strong>九島茶にゃ</strong>
-          <span>Twitterの姿</span>
+          <span>プロフィールアイコン</span>
         </figcaption>
       </figure>
     </section>

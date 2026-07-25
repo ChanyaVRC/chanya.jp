@@ -107,7 +107,7 @@ test("only the home page uses an oversized page heading", async ({ page }) => {
   expect(notFoundSize, "404 heading is oversized").toBeLessThanOrEqual(52);
 });
 
-test("profile code is complete, highlighted and visible in the first viewport", async ({
+test("home hero pairs the identity copy with the full profile icon", async ({
   page,
 }) => {
   const viewports = [
@@ -119,38 +119,30 @@ test("profile code is complete, highlighted and visible in the first viewport", 
     { width: 1280, height: 800 },
     { width: 1440, height: 900 },
   ] as const;
-  const expectedCode = `type Chanya = {
-  name: "九島茶にゃ";
-  role: "多分技術者";
-  location: "Japan";
-};`;
-
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
 
-    const codeFigure = page.locator("[data-profile-code]");
-    await expect(codeFigure).toBeVisible();
+    await expect(page.locator("[data-profile-code]")).toHaveCount(0);
+    await expect(page.getByText("profile.ts", { exact: true })).toHaveCount(0);
+    await expect(
+      page.locator("[data-profile-photo] figcaption"),
+    ).toContainText("九島茶にゃプロフィールアイコン");
+
     const result = await page.evaluate(() => {
-      const figure = document.querySelector<HTMLElement>("[data-profile-code]");
       const copy = document.querySelector<HTMLElement>("[data-home-copy]");
       const photo = document.querySelector<HTMLElement>("[data-profile-photo]");
-      if (!(figure && copy && photo)) {
+      if (!(copy && photo)) {
         throw new Error("home hero geometry hooks are missing");
       }
 
-      const pre = figure.querySelector("pre");
-      if (!(pre instanceof HTMLElement)) {
-        throw new Error("profile code pre is missing");
-      }
       const picture = photo.querySelector("picture");
       const image = photo.querySelector("img");
       if (!(picture instanceof HTMLElement && image instanceof HTMLImageElement)) {
         throw new Error("profile picture is missing");
       }
 
-      const bounds = figure.getBoundingClientRect();
       const copyBounds = copy.getBoundingClientRect();
       const photoBounds = photo.getBoundingClientRect();
       const pictureBounds = picture.getBoundingClientRect();
@@ -169,27 +161,7 @@ test("profile code is complete, highlighted and visible in the first viewport", 
         );
         return width * height;
       };
-      const overlapWidth = Math.max(
-        0,
-        Math.min(bounds.right, photoBounds.right) -
-          Math.max(bounds.left, photoBounds.left),
-      );
-      const overlapHeight = Math.max(
-        0,
-        Math.min(bounds.bottom, photoBounds.bottom) -
-          Math.max(bounds.top, photoBounds.top),
-      );
-      const syntaxKinds = [
-        ...figure.querySelectorAll<HTMLElement>("[data-syntax]"),
-      ].map((token) => token.dataset.syntax);
-
       return {
-        code: {
-          top: bounds.top,
-          right: bounds.right,
-          bottom: bounds.bottom,
-          left: bounds.left,
-        },
         copy: {
           top: copyBounds.top,
           right: copyBounds.right,
@@ -220,49 +192,18 @@ test("profile code is complete, highlighted and visible in the first viewport", 
           bottom: pictureBounds.bottom,
           left: pictureBounds.left,
         },
-        intersectionArea: overlapWidth * overlapHeight,
-        copyCodeIntersection: intersectionArea(copyBounds, bounds),
         copyPhotoIntersection: intersectionArea(copyBounds, photoBounds),
         viewportHeight: window.innerHeight,
         viewportWidth: window.innerWidth,
         documentWidth: document.documentElement.scrollWidth,
-        clientWidth: pre.clientWidth,
-        scrollWidth: pre.scrollWidth,
-        text: pre.textContent?.replace(/\r\n/g, "\n").trim() ?? "",
-        syntaxKinds: [...new Set(syntaxKinds)].sort(),
       };
     });
 
-    expect(
-      result.code.top,
-      `profile code starts above the viewport at ${String(viewport.width)}px`,
-    ).toBeGreaterThanOrEqual(-1);
-    expect(
-      result.code.bottom,
-      `profile code falls below the first viewport at ${String(viewport.width)}px`,
-    ).toBeLessThanOrEqual(result.viewportHeight + 1);
-    expect(
-      result.intersectionArea,
-      `profile code overlaps the photo at ${String(viewport.width)}px`,
-    ).toBeLessThanOrEqual(1);
-    expect(result.copyCodeIntersection).toBeLessThanOrEqual(1);
     expect(result.copyPhotoIntersection).toBeLessThanOrEqual(1);
     expect(
       result.documentWidth,
       `home page scrolls horizontally at ${String(viewport.width)}px`,
     ).toBeLessThanOrEqual(result.viewportWidth + 1);
-    expect(
-      result.scrollWidth,
-      `profile code scrolls horizontally at ${String(viewport.width)}px`,
-    ).toBeLessThanOrEqual(result.clientWidth + 1);
-    expect(result.text).toBe(expectedCode);
-    expect(result.text.match(/多分技術者/g)).toHaveLength(1);
-    expect(result.syntaxKinds).toEqual([
-      "keyword",
-      "property",
-      "string",
-      "type",
-    ]);
     expect(
       Math.abs(result.picture.width - result.picture.height),
       `profile icon is cropped to a non-square frame at ${String(viewport.width)}px`,
@@ -279,7 +220,6 @@ test("profile code is complete, highlighted and visible in the first viewport", 
 
     for (const [name, bounds] of [
       ["copy", result.copy],
-      ["code", result.code],
       ["profile", result.photo],
     ] as const) {
       expect(
@@ -294,39 +234,21 @@ test("profile code is complete, highlighted and visible in the first viewport", 
 
     if (viewport.width <= 768) {
       expect(
-        result.code.top - result.copy.bottom,
-        `copy and profile code are cramped at ${String(viewport.width)}px`,
-      ).toBeGreaterThanOrEqual(12);
-      expect(
-        result.photo.top - result.code.bottom,
-        `profile code and photo are cramped at ${String(viewport.width)}px`,
-      ).toBeGreaterThanOrEqual(12);
-      expect(Math.abs(result.copy.left - result.code.left)).toBeLessThanOrEqual(1);
-      expect(Math.abs(result.copy.right - result.code.right)).toBeLessThanOrEqual(1);
-      expect(Math.abs(result.code.left - result.photo.left)).toBeLessThanOrEqual(1);
-      expect(Math.abs(result.code.right - result.photo.right)).toBeLessThanOrEqual(1);
+        result.photo.top - result.copy.bottom,
+        `identity copy and icon are cramped at ${String(viewport.width)}px`,
+      ).toBeGreaterThanOrEqual(24);
+      expect(Math.abs(result.copy.left - result.photo.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(result.copy.right - result.photo.right)).toBeLessThanOrEqual(1);
     } else {
       expect(
-        result.code.top - result.copy.bottom,
-        `copy and profile code are cramped at ${String(viewport.width)}px`,
+        result.photo.left - result.copy.right,
+        `identity copy and icon columns are cramped at ${String(viewport.width)}px`,
       ).toBeGreaterThanOrEqual(12);
-      expect(
-        result.photo.left - result.code.right,
-        `profile code and icon columns are cramped at ${String(viewport.width)}px`,
-      ).toBeGreaterThanOrEqual(12);
-      expect(
-        Math.abs(result.code.left - result.copy.left),
-        `profile code and copy left edges differ at ${String(viewport.width)}px`,
-      ).toBeLessThanOrEqual(1);
-      expect(
-        Math.abs(result.code.right - result.copy.right),
-        `profile code and copy right edges differ at ${String(viewport.width)}px`,
-      ).toBeLessThanOrEqual(1);
       expect(
         result.photo.bottom,
         `profile icon falls below the first viewport at ${String(viewport.width)}px`,
       ).toBeLessThanOrEqual(result.viewportHeight + 1);
-      const leftCenter = (result.copy.top + result.code.bottom) / 2;
+      const leftCenter = (result.copy.top + result.copy.bottom) / 2;
       const profileCenter = (result.photo.top + result.photo.bottom) / 2;
       expect(
         Math.abs(leftCenter - profileCenter),
