@@ -1,4 +1,4 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Workbench / Component Playground) · home variation: identity copy / uncropped icon · theme: Cobalt · enrichment: owned VRChat photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · genre: modern-minimal · macrostructure: Multi-page system (Split Studio / Long Document / Index-First / Catalogue / Workbench / Component Playground) · home variation: identity copy / uncropped icon · theme: Cobalt · enrichment: owned profile and gallery photography · nav: N1b · footer: Ft2 · contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
 import { createGlobalTheme, globalStyle, style } from "@vanilla-extract/css";
 import { designTokens, valuesOf } from "./design-tokens";
@@ -699,8 +699,7 @@ globalStyle(`${profileFigure} img`, {
   position: "absolute",
   inset: 0,
   width: "100%",
-  height: "auto",
-  aspectRatio: "1",
+  height: "100%",
   objectFit: "contain",
   objectPosition: "center",
 });
