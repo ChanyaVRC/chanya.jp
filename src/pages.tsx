@@ -592,6 +592,13 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
           <button
             class={styles.adminButton}
             type="button"
+            data-gallery-auto-layout
+          >
+            自動配置
+          </button>
+          <button
+            class={styles.adminButton}
+            type="button"
             data-gallery-undo
             disabled
           >
@@ -627,6 +634,34 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
             ログアウト
           </a>
         </div>
+      </div>
+    </section>
+
+    <section
+      class={styles.adminAutoLayoutBar}
+      data-gallery-auto-layout-preview
+      hidden
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <div>
+        <strong>自動配置をプレビュー中</strong>
+        <span data-auto-layout-summary>案 1 / 3</span>
+      </div>
+      <div>
+        <button class={styles.adminButton} type="button" data-auto-layout-next>
+          別案
+        </button>
+        <button
+          class={styles.adminPrimaryButton}
+          type="button"
+          data-auto-layout-accept
+        >
+          採用
+        </button>
+        <button class={styles.adminButton} type="button" data-auto-layout-cancel>
+          取消
+        </button>
       </div>
     </section>
 
@@ -692,6 +727,22 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
             <option value="feature">大きく見せる</option>
           </select>
         </label>
+        <div class={styles.adminFieldRow}>
+          <div class={styles.adminField}>
+            配置
+            <button
+              class={styles.adminButton}
+              type="button"
+              aria-pressed="false"
+              data-gallery-layout-lock
+            >
+              自動配置で動かさない
+            </button>
+          </div>
+          <p class={styles.adminInspectorHint}>
+            固定した写真は順番と表示サイズを維持します。
+          </p>
+        </div>
         <label class={styles.adminField}>
           セクション
           <select data-inspector-input="sectionId" data-item-section-select />

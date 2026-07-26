@@ -1631,6 +1631,60 @@ export const adminToolbarActions = style({
   scrollbarWidth: "thin",
 });
 
+export const adminAutoLayoutBar = style({
+  ...sectionPad,
+  position: "sticky",
+  zIndex: 34,
+  insetBlockStart: "8.75rem",
+  display: "flex",
+  width: "100%",
+  minHeight: "3.75rem",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: vars.space[4],
+  borderBottom: `${vars.size.hairline} solid ${vars.color.cobalt}`,
+  background: vars.color.cobaltPale,
+  color: vars.color.graphite,
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
+  selectors: {
+    "&[hidden]": {
+      display: "none",
+    },
+  },
+  "@media": {
+    "screen and (max-width: 39.99rem)": {
+      position: "relative",
+      insetBlockStart: 0,
+      display: "grid",
+      paddingBlock: vars.space[3],
+      alignItems: "start",
+    },
+  },
+});
+
+globalStyle(`${adminAutoLayoutBar} > div:first-child`, {
+  display: "grid",
+  gap: vars.space[1],
+});
+
+globalStyle(`${adminAutoLayoutBar} strong`, {
+  fontFamily: vars.font.display,
+  fontSize: "0.84rem",
+});
+
+globalStyle(`${adminAutoLayoutBar} span`, {
+  color: vars.color.cobaltDark,
+  fontFamily: vars.font.mono,
+  fontSize: "0.66rem",
+  fontVariantNumeric: "tabular-nums",
+});
+
+globalStyle(`${adminAutoLayoutBar} > div:last-child`, {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: vars.space[2],
+});
+
 export const adminStatus = style({
   display: "inline-flex",
   minHeight: vars.size.control,
@@ -1888,6 +1942,24 @@ export const galleryOrderBadge = style({
   fontSize: "0.66rem",
   pointerEvents: "none",
   transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}`,
+});
+
+export const galleryLayoutLockMark = style({
+  position: "absolute",
+  zIndex: 2,
+  insetBlockStart: vars.space[2],
+  insetInlineEnd: vars.space[2],
+  padding: `${vars.space[1]} ${vars.space[2]}`,
+  border: `${vars.size.hairline} solid ${vars.color.inverseSoft}`,
+  borderRadius: vars.radius.control,
+  background: `color-mix(in oklab, ${vars.color.graphite} 86%, ${vars.color.transparent})`,
+  color: vars.color.inverse,
+  fontFamily: vars.font.mono,
+  fontSize: "0.6rem",
+  fontWeight: vars.weight.semibold,
+  letterSpacing: "0.06em",
+  pointerEvents: "none",
+  textTransform: "uppercase",
 });
 
 export const adminInspector = style({

@@ -34,6 +34,7 @@ const galleryManifestItemBaseSchema = z.object({
   width: z.number().int().min(1).max(16_384),
   height: z.number().int().min(1).max(16_384),
   layout: galleryLayoutSchema,
+  layoutLocked: z.boolean().default(false),
   focalPoint: z.object({
     x: z.number().min(0).max(1),
     y: z.number().min(0).max(1),
@@ -195,6 +196,7 @@ export function seedGalleryManifest(): GalleryManifest {
       ...item,
       sectionId: defaultGallerySectionId,
       layout: seedLayout(index),
+      layoutLocked: false,
       focalPoint: { x: 0.5, y: 0.5 },
       source: { kind: "static", id: item.id },
     })),

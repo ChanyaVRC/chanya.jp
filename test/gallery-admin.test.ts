@@ -26,6 +26,7 @@ describe("gallery manifest", () => {
         (item) => item.sectionId === defaultGallerySectionId,
       ),
     ).toBe(true);
+    expect(manifest.items.every((item) => !item.layoutLocked)).toBe(true);
     expect(galleryManifestSchema.parse(manifest)).toEqual(manifest);
     expect(
       manifest.items.filter((item) => item.layout === "feature").length,
@@ -75,6 +76,7 @@ describe("gallery manifest", () => {
         (item) => item.sectionId === defaultGallerySectionId,
       ),
     ).toBe(true);
+    expect(migrated.items.every((item) => !item.layoutLocked)).toBe(true);
   });
 
   it("重複ID・不明なセクション・範囲外の焦点位置を拒否する", () => {

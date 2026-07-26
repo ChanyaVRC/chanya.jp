@@ -1483,3 +1483,66 @@ test("Gallery Workbench toolbar remains reachable at 320px", async ({
   expect(result.scrollable).toBe(true);
   expect(result.pageWidth).toBeLessThanOrEqual(result.viewportWidth);
 });
+
+test("Gallery Workbench previews automatic layouts before one accepted draft save", async ({
+  page,
+}) => {
+  let revision = 1;
+  let draftWrites = 0;
+  await page.route("**/admin/gallery/api/draft", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    const request: unknown = route.request().postDataJSON();
+    if (
+      typeof request !== "object" ||
+      request === null ||
+      !("sections" in request) ||
+      !("items" in request)
+    ) {
+      await route.fulfill({ status: 400, body: "Invalid test request" });
+      return;
+    }
+    draftWrites += 1;
+    revision += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        manifest: {
+          schemaVersion: 2,
+          version: revision,
+          updatedAt: new Date().toISOString(),
+          sections: request.sections,
+          items: request.items,
+        },
+      }),
+    });
+  });
+
+  await page.goto("/admin/gallery/");
+  await page.locator("[data-gallery-auto-layout]").click();
+
+  const preview = page.locator("[data-gallery-auto-layout-preview]");
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText("自動配置をプレビュー中");
+  await expect(page.locator("[data-gallery-save]")).toBeDisabled();
+  await page.waitForTimeout(800);
+  expect(draftWrites).toBe(0);
+
+  await page.locator("[data-auto-layout-next]").click();
+  await expect(preview.locator("[data-auto-layout-summary]")).toContainText("案");
+  await page.locator("[data-auto-layout-accept]").click();
+  await expect(preview).toBeHidden();
+  await expect.poll(() => draftWrites).toBe(1);
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+
+  await page.locator("[data-gallery-select]").first().click();
+  const lock = page.locator("[data-gallery-layout-lock]");
+  await lock.click();
+  await expect(lock).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-gallery-layout-lock-mark]").first()).toBeVisible();
+});

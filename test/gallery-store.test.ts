@@ -39,7 +39,7 @@ interface LegacyGalleryManifest {
   readonly lastMutation: GalleryManifest["lastMutation"];
   readonly items: readonly Omit<
     GalleryManifest["items"][number],
-    "sectionId"
+    "sectionId" | "layoutLocked"
   >[];
 }
 

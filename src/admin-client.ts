@@ -79,6 +79,36 @@ const saveButton = requiredElement(root, "[data-gallery-save]", isButton);
 const publishButton = requiredElement(root, "[data-gallery-publish]", isButton);
 const importButton = requiredElement(root, "[data-gallery-import]", isButton);
 const addSectionButton = requiredElement(root, "[data-section-add]", isButton);
+const autoLayoutButton = requiredElement(
+  root,
+  "[data-gallery-auto-layout]",
+  isButton,
+);
+const autoLayoutPreviewBar = requiredElement(
+  root,
+  "[data-gallery-auto-layout-preview]",
+  isHtmlElement,
+);
+const autoLayoutSummary = requiredElement(
+  root,
+  "[data-auto-layout-summary]",
+  isHtmlElement,
+);
+const autoLayoutNextButton = requiredElement(
+  root,
+  "[data-auto-layout-next]",
+  isButton,
+);
+const autoLayoutAcceptButton = requiredElement(
+  root,
+  "[data-auto-layout-accept]",
+  isButton,
+);
+const autoLayoutCancelButton = requiredElement(
+  root,
+  "[data-auto-layout-cancel]",
+  isButton,
+);
 const folderInput = requiredElement(
   root,
   "[data-gallery-folder-input]",
@@ -98,6 +128,13 @@ root.append(dragStatus);
 interface GalleryContent {
   readonly sections: GallerySection[];
   readonly items: GalleryManifestItem[];
+}
+
+interface AutoLayoutPreview {
+  readonly baseline: GalleryContent;
+  readonly candidates: readonly GalleryContent[];
+  readonly candidateIndex: number;
+  readonly changedCount: number;
 }
 
 type EditorSelection =
@@ -162,6 +199,7 @@ let dragIntent: DragIntent | null = null;
 let acceptedDragPoint: DragPoint | null = null;
 let dragGhost: HTMLElement | null = null;
 let dragLabelVisibilityTimer: number | null = null;
+let autoLayoutPreview: AutoLayoutPreview | null = null;
 
 function contentFingerprint(content: GalleryContent): string {
   return JSON.stringify({
@@ -181,6 +219,118 @@ function cloneContent(
     sections: structuredClone(content.sections),
     items: structuredClone(content.items),
   };
+}
+
+function isAutoLayoutPreviewing(): boolean {
+  return autoLayoutPreview !== null;
+}
+
+function stableHash(value: string): number {
+  let hash = 2_166_136_261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+function automaticItemOrder(
+  items: readonly GalleryManifestItem[],
+  variant: number,
+): GalleryManifestItem[] {
+  return [...items].toSorted((left, right) => {
+    const leftDate = left.date ?? "";
+    const rightDate = right.date ?? "";
+    if (variant === 0 && leftDate !== rightDate) {
+      return leftDate.localeCompare(rightDate);
+    }
+    if (variant === 1 && leftDate !== rightDate) {
+      return rightDate.localeCompare(leftDate);
+    }
+    if (variant === 2) {
+      const aspectDifference =
+        left.width / left.height - right.width / right.height;
+      if (aspectDifference !== 0) {
+        return aspectDifference > 0 ? -1 : 1;
+      }
+    }
+    return stableHash(`${left.id}:${String(variant)}`) - stableHash(`${right.id}:${String(variant)}`);
+  });
+}
+
+function automaticLayoutFor(
+  item: GalleryManifestItem,
+  index: number,
+  itemCount: number,
+  variant: number,
+): GalleryManifestItem["layout"] {
+  const aspect = item.width / item.height;
+  const featurePeriod = [11, 9, 13][variant] ?? 11;
+  const widePeriod = [5, 4, 6][variant] ?? 5;
+  const offset = stableHash(`${item.id}:${String(variant)}`) % 3;
+  if (
+    itemCount >= 7 &&
+    aspect >= 1.1 &&
+    (index + offset) % featurePeriod === 0
+  ) {
+    return "feature";
+  }
+  if (aspect >= 1.28 && (index + offset) % widePeriod === 0) {
+    return "wide";
+  }
+  return "standard";
+}
+
+function automaticLayoutCandidate(
+  baseline: GalleryContent,
+  variant: number,
+): GalleryContent {
+  const items = baseline.sections.flatMap((section) => {
+    const sectionItems = baseline.items.filter(
+      (item) => item.sectionId === section.id,
+    );
+    const unlocked = automaticItemOrder(
+      sectionItems.filter((item) => !item.layoutLocked),
+      variant,
+    );
+    let unlockedIndex = 0;
+    return sectionItems.map((original, index) => {
+      if (original.layoutLocked) {
+        return structuredClone(original);
+      }
+      const item = unlocked[unlockedIndex++] ?? original;
+      return {
+        ...item,
+        layout: automaticLayoutFor(item, index, sectionItems.length, variant),
+      };
+    });
+  });
+  return { sections: structuredClone(baseline.sections), items };
+}
+
+function createAutoLayoutPreview(): AutoLayoutPreview | null {
+  const baseline = cloneContent();
+  const candidates = [0, 1, 2]
+    .map((variant) => automaticLayoutCandidate(baseline, variant))
+    .filter(
+      (candidate) =>
+        contentFingerprint(candidate) !== contentFingerprint(baseline),
+    )
+    .filter(
+      (candidate, index, all) =>
+        all.findIndex(
+          (other) => contentFingerprint(other) === contentFingerprint(candidate),
+        ) === index,
+    );
+  const first = candidates[0];
+  if (!first) {
+    return null;
+  }
+  const changedCount = first.items.filter((item, index) => {
+    const original = baseline.items.find((candidate) => candidate.id === item.id);
+    return original ? original.layout !== item.layout || baseline.items[index]?.id !== item.id : false;
+  }).length;
+  return { baseline, candidates, candidateIndex: 0, changedCount };
 }
 
 function setStatus(
@@ -288,6 +438,7 @@ function createFigure(item: GalleryManifestItem): HTMLElement {
   const figure = document.createElement("figure");
   const button = document.createElement("button");
   const badge = document.createElement("span");
+  const lock = document.createElement("span");
   const caption = document.createElement("figcaption");
   const title = document.createElement("span");
   const date = document.createElement("time");
@@ -295,9 +446,12 @@ function createFigure(item: GalleryManifestItem): HTMLElement {
   button.type = "button";
   badge.className = styles.galleryOrderBadge;
   badge.setAttribute("aria-hidden", "true");
+  lock.className = styles.galleryLayoutLockMark;
+  lock.dataset.galleryLayoutLockMark = "";
+  lock.setAttribute("aria-hidden", "true");
   title.dataset.galleryCaptionTitle = "";
   date.dataset.galleryCaptionDate = "";
-  button.append(badge, createPicture(item));
+  button.append(badge, lock, createPicture(item));
   caption.append(title, date);
   figure.append(button, caption);
   return figure;
@@ -320,12 +474,14 @@ function updateFigure(
 
   const button = figure.querySelector("button");
   const badge = figure.querySelector(`.${styles.galleryOrderBadge}`);
+  const lock = figure.querySelector("[data-gallery-layout-lock-mark]");
   const picture = figure.querySelector("picture");
   const title = figure.querySelector("[data-gallery-caption-title]");
   const date = figure.querySelector("[data-gallery-caption-date]");
   if (
     !(button instanceof HTMLButtonElement) ||
     !(badge instanceof HTMLElement) ||
+    !(lock instanceof HTMLElement) ||
     !(picture instanceof HTMLPictureElement) ||
     !(title instanceof HTMLElement) ||
     !(date instanceof HTMLTimeElement)
@@ -353,8 +509,10 @@ function updateFigure(
   button.dataset.galleryDate = item.date ?? "";
   button.dataset.galleryWidth = String(item.width);
   button.dataset.galleryHeight = String(item.height);
-  button.draggable = !previewOnly;
+  button.draggable = !previewOnly && !isAutoLayoutPreviewing();
   badge.textContent = String(index + 1).padStart(2, "0");
+  lock.hidden = !item.layoutLocked;
+  lock.textContent = "固定";
 
   const expectedSignature =
     localPreviews.get(item.id) ??
@@ -489,13 +647,13 @@ function updateSectionElement(
   description.textContent = section.description;
   description.hidden = section.description.length === 0;
   count.textContent = `${String(itemCount).padStart(2, "0")} works`;
-  edit.hidden = previewOnly;
+  edit.hidden = previewOnly || isAutoLayoutPreviewing();
   edit.ariaLabel = `${section.title}セクションを編集`;
   edit.ariaPressed = String(
     selection?.kind === "section" && selection.id === section.id,
   );
-  drag.hidden = previewOnly;
-  drag.draggable = !previewOnly;
+  drag.hidden = previewOnly || isAutoLayoutPreviewing();
+  drag.draggable = !previewOnly && !isAutoLayoutPreviewing();
   drag.ariaLabel = `${section.title}セクションをドラッグして並べ替え`;
   grid.dataset.sectionId = section.id;
   grid.ariaLabel = previewOnly
@@ -525,7 +683,10 @@ function renderInspector(): void {
     selectedSectionId
       ? manifest.sections.find((section) => section.id === selectedSectionId)
       : undefined;
-  const open = Boolean(selectedItem ?? selectedSection) && !previewOnly;
+  const open =
+    Boolean(selectedItem ?? selectedSection) &&
+    !previewOnly &&
+    !isAutoLayoutPreviewing();
   inspector.dataset.open = String(open);
   inspector.dataset.editorKind = selectedSection ? "section" : "item";
   inspector.setAttribute("aria-hidden", String(!open));
@@ -605,6 +766,13 @@ function renderInspector(): void {
         element.value = values[key];
       }
     });
+    const lockButton = inspector.querySelector("[data-gallery-layout-lock]");
+    if (lockButton instanceof HTMLButtonElement) {
+      lockButton.ariaPressed = String(selectedItem.layoutLocked);
+      lockButton.textContent = selectedItem.layoutLocked
+        ? "自動配置で固定中"
+        : "自動配置で動かさない";
+    }
     return;
   }
 
@@ -833,14 +1001,125 @@ function render(animate = false): void {
   }
 
   root.dataset.manifestVersion = String(manifest.version);
-  undoButton.disabled = undoStack.length === 0;
+  undoButton.disabled = undoStack.length === 0 || isAutoLayoutPreviewing();
   renderInspector();
+  renderAutoLayoutPreview();
   if (animate) {
     animateReorder(before);
   }
 }
 
+function renderAutoLayoutPreview(): void {
+  const preview = autoLayoutPreview;
+  const active = preview !== null;
+  root.dataset.autoLayoutPreview = String(active);
+  autoLayoutPreviewBar.hidden = !active;
+  autoLayoutButton.disabled =
+    active || importInProgress || saveInProgress || Boolean(dragState);
+  for (const button of [
+    importButton,
+    addSectionButton,
+    previewButton,
+    saveButton,
+    publishButton,
+  ]) {
+    button.disabled = active;
+  }
+  if (!preview) {
+    importButton.disabled = importInProgress;
+    addSectionButton.disabled = false;
+    previewButton.disabled = false;
+    saveButton.disabled = saveInProgress;
+    publishButton.disabled = saveInProgress;
+    return;
+  }
+  autoLayoutSummary.textContent = `案 ${String(preview.candidateIndex + 1)} / ${String(preview.candidates.length)} · ${String(preview.changedCount)}枚を整理`;
+  autoLayoutNextButton.disabled = preview.candidates.length < 2;
+}
+
+function startAutoLayoutPreview(): void {
+  if (
+    isAutoLayoutPreviewing() ||
+    importInProgress ||
+    saveInProgress ||
+    dragState
+  ) {
+    return;
+  }
+  if (saveTimer !== null) {
+    window.clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  const preview = createAutoLayoutPreview();
+  if (!preview) {
+    showToast("固定以外の写真に、目立つ配置変更を作れませんでした。");
+    return;
+  }
+  autoLayoutPreview = preview;
+  const candidate = preview.candidates[0]!;
+  manifest = { ...manifest, sections: candidate.sections, items: candidate.items };
+  selection = null;
+  render(true);
+  setStatus("自動配置の候補を確認中");
+}
+
+function showNextAutoLayoutCandidate(): void {
+  const preview = autoLayoutPreview;
+  if (!preview || preview.candidates.length < 2) {
+    return;
+  }
+  const candidateIndex = (preview.candidateIndex + 1) % preview.candidates.length;
+  autoLayoutPreview = { ...preview, candidateIndex };
+  const candidate = preview.candidates[candidateIndex]!;
+  manifest = { ...manifest, sections: candidate.sections, items: candidate.items };
+  render(true);
+}
+
+function acceptAutoLayoutPreview(): void {
+  const preview = autoLayoutPreview;
+  if (!preview) {
+    return;
+  }
+  const candidate = preview.candidates[preview.candidateIndex]!;
+  const changed = contentFingerprint(preview.baseline) !== contentFingerprint(candidate);
+  autoLayoutPreview = null;
+  manifest = { ...manifest, sections: candidate.sections, items: candidate.items };
+  if (changed) {
+    pushUndo(preview.baseline);
+  }
+  render(true);
+  if (changed) {
+    scheduleSave();
+    showToast("自動配置を採用しました。元に戻すこともできます。");
+  }
+}
+
+function cancelAutoLayoutPreview(): void {
+  const preview = autoLayoutPreview;
+  if (!preview) {
+    return;
+  }
+  autoLayoutPreview = null;
+  manifest = {
+    ...manifest,
+    sections: structuredClone(preview.baseline.sections),
+    items: structuredClone(preview.baseline.items),
+  };
+  render(true);
+  if (
+    contentFingerprint(cloneContent()) !==
+    contentFingerprint(cloneContent(confirmedManifest))
+  ) {
+    scheduleSave();
+  } else {
+    setStatus("下書きは同期済み");
+  }
+}
+
 function scheduleSave(): void {
+  if (isAutoLayoutPreviewing()) {
+    return;
+  }
   setStatus("未保存の変更", "saving");
   if (importInProgress || dragState) {
     saveAgain = true;
@@ -924,7 +1203,7 @@ async function fetchPublishedManifest(): Promise<GalleryManifest | null> {
 }
 
 async function performSave(): Promise<boolean> {
-  if (importInProgress || dragState) {
+  if (importInProgress || dragState || isAutoLayoutPreviewing()) {
     saveAgain = true;
     return true;
   }
@@ -1061,7 +1340,13 @@ function saveDraft(): Promise<boolean> {
     do {
       saveAgain = false;
       saved = await performSave();
-    } while (saved && saveAgain && !importInProgress && !dragState);
+    } while (
+      saved &&
+      saveAgain &&
+      !importInProgress &&
+      !dragState &&
+      !isAutoLayoutPreviewing()
+    );
     if (!saved) {
       saveAgain = false;
     }
@@ -1073,6 +1358,9 @@ function saveDraft(): Promise<boolean> {
 }
 
 async function publish(): Promise<void> {
+  if (isAutoLayoutPreviewing()) {
+    return;
+  }
   if (saveTimer !== null) {
     window.clearTimeout(saveTimer);
     saveTimer = null;
@@ -1340,6 +1628,20 @@ function updateSelected(field: string, value: string): void {
   scheduleSave();
 }
 
+function toggleSelectedLayoutLock(): void {
+  const index = selectedIndex();
+  const item = manifest.items[index];
+  if (!item || isAutoLayoutPreviewing()) {
+    return;
+  }
+  pushUndo();
+  const items = cloneItems();
+  items[index] = { ...item, layoutLocked: !item.layoutLocked };
+  manifest = { ...manifest, items };
+  render();
+  scheduleSave();
+}
+
 function updateSelectedSection(field: string, value: string): void {
   const index = selectedSectionIndex();
   const current = manifest.sections[index];
@@ -1517,6 +1819,7 @@ async function importFiles(inputFiles: readonly File[]): Promise<void> {
         width: dimensions.width,
         height: dimensions.height,
         layout: "standard",
+        layoutLocked: false,
         focalPoint: { x: 0.5, y: 0.5 },
         source: { kind: "managed", key: crypto.randomUUID() },
       };
@@ -2312,7 +2615,7 @@ function cancelDrag(): void {
 }
 
 canvas.addEventListener("click", (event) => {
-  if (previewOnly) {
+  if (previewOnly || isAutoLayoutPreviewing()) {
     return;
   }
   const target = event.target;
@@ -2359,6 +2662,9 @@ canvas.addEventListener("click", (event) => {
 });
 
 canvas.addEventListener("keydown", (event) => {
+  if (isAutoLayoutPreviewing()) {
+    return;
+  }
   if (
     !event.altKey ||
     !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
@@ -2393,12 +2699,14 @@ canvas.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("dragstart", (event) => {
-  if (saveInProgress || importInProgress) {
+  if (saveInProgress || importInProgress || isAutoLayoutPreviewing()) {
     event.preventDefault();
     showToast(
       importInProgress
         ? "写真の取り込み完了後に移動できます。"
-        : "下書きの保存完了後に移動できます。",
+        : isAutoLayoutPreviewing()
+          ? "自動配置を採用または取り消してから移動できます。"
+          : "下書きの保存完了後に移動できます。",
     );
     return;
   }
@@ -2472,7 +2780,7 @@ canvas.addEventListener("dragstart", (event) => {
 });
 
 canvas.addEventListener("dragover", (event) => {
-  if (previewOnly || !dragState) {
+  if (previewOnly || isAutoLayoutPreviewing() || !dragState) {
     return;
   }
   const currentDrag = dragState;
@@ -2608,6 +2916,9 @@ inspector.querySelector("[data-inspector-close]")?.addEventListener("click", () 
   returnFocus?.focus({ preventScroll: true });
 });
 inspector.querySelector("[data-gallery-remove]")?.addEventListener("click", removeSelected);
+inspector
+  .querySelector("[data-gallery-layout-lock]")
+  ?.addEventListener("click", toggleSelectedLayoutLock);
 inspector.querySelectorAll<HTMLButtonElement>("[data-gallery-move]").forEach((button) => {
   button.addEventListener("click", () => {
     moveSelected(Number(button.dataset.galleryMove));
@@ -2639,6 +2950,10 @@ importButton.addEventListener("click", () => {
   void chooseFolder();
 });
 addSectionButton.addEventListener("click", addSection);
+autoLayoutButton.addEventListener("click", startAutoLayoutPreview);
+autoLayoutNextButton.addEventListener("click", showNextAutoLayoutCandidate);
+autoLayoutAcceptButton.addEventListener("click", acceptAutoLayoutPreview);
+autoLayoutCancelButton.addEventListener("click", cancelAutoLayoutPreview);
 folderInput.addEventListener("change", () => {
   const files = folderInput.files ? Array.from(folderInput.files) : [];
   folderInput.value = "";
