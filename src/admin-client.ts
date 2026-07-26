@@ -130,6 +130,12 @@ interface GalleryContent {
   readonly items: GalleryManifestItem[];
 }
 
+interface PendingDraftMutation {
+  readonly body: string;
+  readonly fingerprint: string;
+  readonly retryNotBefore: number;
+}
+
 interface AutoLayoutPreview {
   readonly baseline: GalleryContent;
   readonly candidates: readonly GalleryContent[];
@@ -147,6 +153,8 @@ type ItemDropAxis = "block" | "inline";
 interface DragPoint {
   readonly x: number;
   readonly y: number;
+  readonly documentX: number;
+  readonly documentY: number;
 }
 
 interface ItemPlacement {
@@ -185,6 +193,7 @@ type DragIntent =
 const undoStack: GalleryContent[] = [];
 let manifest = structuredClone(bootstrap.manifest);
 let confirmedManifest = structuredClone(bootstrap.manifest);
+let pendingDraftMutation: PendingDraftMutation | null = null;
 let selection: EditorSelection | null = null;
 let previewOnly = false;
 let importInProgress = false;
@@ -192,6 +201,7 @@ let saveTimer: number | null = null;
 let saveQueue: Promise<boolean> | null = null;
 let saveAgain = false;
 let saveInProgress = false;
+let publishInProgress = false;
 let toastTimer: number | null = null;
 let inspectorEditStart: GalleryContent | null = null;
 let dragState: DragState | null = null;
@@ -223,6 +233,39 @@ function cloneContent(
 
 function isAutoLayoutPreviewing(): boolean {
   return autoLayoutPreview !== null;
+}
+
+function hasUnconfirmedChanges(): boolean {
+  return (
+    pendingDraftMutation !== null ||
+    contentFingerprint(cloneContent()) !==
+      contentFingerprint(cloneContent(confirmedManifest))
+  );
+}
+
+function syncToolbarControls(): void {
+  const preview = autoLayoutPreview;
+  const interactionInProgress =
+    importInProgress ||
+    saveInProgress ||
+    publishInProgress ||
+    dragState !== null;
+  const mainToolbarLocked = preview !== null || interactionInProgress;
+
+  importButton.disabled = mainToolbarLocked;
+  addSectionButton.disabled = mainToolbarLocked;
+  autoLayoutButton.disabled = mainToolbarLocked;
+  previewButton.disabled = mainToolbarLocked;
+  saveButton.disabled = mainToolbarLocked;
+  publishButton.disabled = mainToolbarLocked;
+  undoButton.disabled = mainToolbarLocked || undoStack.length === 0;
+
+  autoLayoutNextButton.disabled =
+    !preview ||
+    interactionInProgress ||
+    preview.candidates.length < 2;
+  autoLayoutAcceptButton.disabled = !preview || interactionInProgress;
+  autoLayoutCancelButton.disabled = !preview || interactionInProgress;
 }
 
 function stableHash(value: string): number {
@@ -385,7 +428,7 @@ function pushUndo(content: GalleryContent = cloneContent()): void {
   if (undoStack.length > 30) {
     undoStack.shift();
   }
-  undoButton.disabled = false;
+  syncToolbarControls();
 }
 
 function managedSource(
@@ -699,6 +742,71 @@ function updateSectionElement(
   return grid;
 }
 
+type InspectorControl =
+  | HTMLInputElement
+  | HTMLTextAreaElement
+  | HTMLSelectElement;
+
+function clearInspectorValidity(control: InspectorControl): void {
+  control.setCustomValidity("");
+  control.removeAttribute("aria-invalid");
+}
+
+function invalidInspectorControl(): InspectorControl | null {
+  const control = inspector.querySelector("[aria-invalid='true']");
+  return control instanceof HTMLInputElement ||
+    control instanceof HTMLTextAreaElement ||
+    control instanceof HTMLSelectElement
+    ? control
+    : null;
+}
+
+function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(parsed.valueOf()) &&
+    parsed.toISOString().startsWith(value)
+  );
+}
+
+function validateInspectorControl(control: InspectorControl): boolean {
+  clearInspectorValidity(control);
+  const itemField = control.dataset.inspectorInput;
+  const sectionField = control.dataset.sectionInput;
+  let message = "";
+
+  if (
+    (itemField === "title" || sectionField === "title") &&
+    control.value.trim().length === 0
+  ) {
+    message = "タイトルを入力してください。";
+  } else if (
+    itemField === "alt" &&
+    control.value.trim().length === 0
+  ) {
+    message = "代替テキストを入力してください。";
+  } else if (
+    itemField === "date" &&
+    control.value !== "" &&
+    !isValidIsoDate(control.value)
+  ) {
+    message = "撮影日はYYYY-MM-DD形式の正しい日付で入力してください。";
+  } else if (!control.validity.valid) {
+    message = "入力内容を確認してください。";
+  }
+
+  if (!message) {
+    return true;
+  }
+  control.setCustomValidity(message);
+  control.setAttribute("aria-invalid", "true");
+  setStatus(message, "error");
+  return false;
+}
+
 function renderInspector(): void {
   const selectedItemId =
     selection?.kind === "item" ? selection.id : undefined;
@@ -731,6 +839,11 @@ function renderInspector(): void {
   }
 
   if (!selectedItem && !selectedSection) {
+    inspector
+      .querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+        "[data-inspector-input], [data-section-input]",
+      )
+      .forEach(clearInspectorValidity);
     return;
   }
 
@@ -794,6 +907,9 @@ function renderInspector(): void {
       if (key && values[key] !== undefined && element.value !== values[key]) {
         element.value = values[key];
       }
+      if (key && values[key] !== undefined) {
+        clearInspectorValidity(element);
+      }
     });
     const lockButton = inspector.querySelector("[data-gallery-layout-lock]");
     if (lockButton instanceof HTMLButtonElement) {
@@ -838,6 +954,9 @@ function renderInspector(): void {
       element.value !== sectionValues[key]
     ) {
       element.value = sectionValues[key];
+    }
+    if (key && sectionValues[key] !== undefined) {
+      clearInspectorValidity(element);
     }
   });
 }
@@ -1030,7 +1149,6 @@ function render(animate = false): void {
   }
 
   root.dataset.manifestVersion = String(manifest.version);
-  undoButton.disabled = undoStack.length === 0 || isAutoLayoutPreviewing();
   renderInspector();
   renderAutoLayoutPreview();
   if (animate) {
@@ -1043,27 +1161,12 @@ function renderAutoLayoutPreview(): void {
   const active = preview !== null;
   root.dataset.autoLayoutPreview = String(active);
   autoLayoutPreviewBar.hidden = !active;
-  autoLayoutButton.disabled =
-    active || importInProgress || saveInProgress || Boolean(dragState);
-  for (const button of [
-    importButton,
-    addSectionButton,
-    previewButton,
-    saveButton,
-    publishButton,
-  ]) {
-    button.disabled = active;
-  }
   if (!preview) {
-    importButton.disabled = importInProgress;
-    addSectionButton.disabled = false;
-    previewButton.disabled = false;
-    saveButton.disabled = saveInProgress;
-    publishButton.disabled = saveInProgress;
+    syncToolbarControls();
     return;
   }
   autoLayoutSummary.textContent = `案 ${String(preview.candidateIndex + 1)} / ${String(preview.candidates.length)} · ${String(preview.changedCount)}枚を整理`;
-  autoLayoutNextButton.disabled = preview.candidates.length < 2;
+  syncToolbarControls();
 }
 
 function startAutoLayoutPreview(): void {
@@ -1071,18 +1174,19 @@ function startAutoLayoutPreview(): void {
     isAutoLayoutPreviewing() ||
     importInProgress ||
     saveInProgress ||
+    publishInProgress ||
     dragState
   ) {
     return;
-  }
-  if (saveTimer !== null) {
-    window.clearTimeout(saveTimer);
-    saveTimer = null;
   }
   const preview = createAutoLayoutPreview();
   if (!preview) {
     showToast("固定以外の写真に、目立つ配置変更を作れませんでした。");
     return;
+  }
+  if (saveTimer !== null) {
+    window.clearTimeout(saveTimer);
+    saveTimer = null;
   }
   autoLayoutPreview = preview;
   const candidate = preview.candidates[0]!;
@@ -1117,8 +1221,10 @@ function acceptAutoLayoutPreview(): void {
     pushUndo(preview.baseline);
   }
   render(true);
-  if (changed) {
+  if (hasUnconfirmedChanges()) {
     scheduleSave();
+  }
+  if (changed) {
     showToast("自動配置を採用しました。元に戻すこともできます。");
   }
 }
@@ -1135,10 +1241,7 @@ function cancelAutoLayoutPreview(): void {
     items: structuredClone(preview.baseline.items),
   };
   render(true);
-  if (
-    contentFingerprint(cloneContent()) !==
-    contentFingerprint(cloneContent(confirmedManifest))
-  ) {
+  if (hasUnconfirmedChanges()) {
     scheduleSave();
   } else {
     setStatus("下書きは同期済み");
@@ -1150,7 +1253,7 @@ function scheduleSave(): void {
     return;
   }
   setStatus("未保存の変更", "saving");
-  if (importInProgress || dragState) {
+  if (importInProgress || publishInProgress || dragState) {
     saveAgain = true;
     return;
   }
@@ -1176,6 +1279,68 @@ async function errorMessage(response: Response): Promise<string> {
     // A plain-text or empty error response is handled by the status fallback.
   }
   return `HTTP ${String(response.status)}`;
+}
+
+async function isRetryableMutationResponse(
+  response: Response,
+): Promise<boolean> {
+  if (response.status !== 503) {
+    return false;
+  }
+  try {
+    const value: unknown = await response.clone().json();
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      (value as Record<string, unknown>).retryable === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+const mutationRetryDelayCap = 5_000;
+
+function mutationRetryDelay(response: Response): number {
+  const retryAfter = response.headers.get("Retry-After")?.trim();
+  if (!retryAfter) {
+    return 0;
+  }
+
+  if (/^\d+(?:\.\d+)?$/u.test(retryAfter)) {
+    return Math.min(Number(retryAfter) * 1_000, mutationRetryDelayCap);
+  }
+
+  const retryAt = Date.parse(retryAfter);
+  if (Number.isNaN(retryAt)) {
+    return 0;
+  }
+  return Math.min(
+    Math.max(retryAt - Date.now(), 0),
+    mutationRetryDelayCap,
+  );
+}
+
+async function waitForMutationRetry(delay: number): Promise<void> {
+  if (delay <= 0) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delay);
+  });
+}
+
+async function fetchMutationWithRepairRetry(
+  input: string,
+  init: RequestInit,
+): Promise<Response> {
+  const response = await fetch(input, init);
+  if (!(await isRetryableMutationResponse(response))) {
+    return response;
+  }
+
+  await waitForMutationRetry(mutationRetryDelay(response));
+  return fetch(input, init);
 }
 
 function adminHeaders(contentType = true): Headers {
@@ -1210,62 +1375,91 @@ async function fetchCanonicalDraft(): Promise<GalleryManifest | null> {
   }
 }
 
-async function fetchPublishedManifest(): Promise<GalleryManifest | null> {
-  try {
-    const response = await fetch("/admin/gallery/api/published", {
-      credentials: "same-origin",
-      headers: adminHeaders(false),
-    });
-    if (!response.ok) {
-      return null;
-    }
+function createPendingDraftMutation(): PendingDraftMutation {
+  const content = cloneContent();
+  const fingerprint = contentFingerprint(content);
+  const body = JSON.stringify({
+    baseVersion: manifest.version,
+    mutationId: crypto.randomUUID(),
+    sections: content.sections,
+    items: content.items,
+  });
+  return { body, fingerprint, retryNotBefore: 0 };
+}
 
-    const value: unknown = await response.json();
-    const responseRecord =
-      typeof value === "object" && value !== null
-        ? (value as Record<string, unknown>)
-        : {};
-    return galleryManifestSchema.parse(responseRecord.manifest);
-  } catch {
-    return null;
-  }
+async function reportPendingDraftResult(
+  mutation: PendingDraftMutation,
+  error: unknown,
+  retryable: boolean,
+): Promise<void> {
+  const canonical = await fetchCanonicalDraft();
+  const bodyWasApplied =
+    canonical !== null &&
+    contentFingerprint(cloneContent(canonical)) === mutation.fingerprint;
+  setStatus(
+    bodyWasApplied
+      ? "本文は反映済み・保存履歴の修復待ち"
+      : "保存結果の確認待ち",
+    "error",
+  );
+  showToast(
+    retryable
+      ? "保存履歴を確定できませんでした。次の保存で同じ操作を再送します。"
+      : error instanceof Error
+        ? `保存結果を確定できません: ${error.message}。次の保存で同じ操作を再送します。`
+        : "保存結果を確定できません。次の保存で同じ操作を再送します。",
+  );
 }
 
 async function performSave(): Promise<boolean> {
-  if (importInProgress || dragState || isAutoLayoutPreviewing()) {
+  if (
+    importInProgress ||
+    publishInProgress ||
+    dragState ||
+    isAutoLayoutPreviewing()
+  ) {
     saveAgain = true;
-    return true;
+    return false;
   }
 
   if (
+    !pendingDraftMutation &&
     contentFingerprint(cloneContent(manifest)) ===
-    contentFingerprint(cloneContent(confirmedManifest))
+      contentFingerprint(cloneContent(confirmedManifest))
   ) {
     setStatus("下書きは同期済み");
     return true;
   }
 
-  const sentContent = cloneContent();
-  const sentFingerprint = contentFingerprint(sentContent);
+  const mutation =
+    pendingDraftMutation ?? createPendingDraftMutation();
+  pendingDraftMutation = mutation;
+  const sentFingerprint = mutation.fingerprint;
   saveInProgress = true;
-  setStatus("下書きを保存中", "saving");
-  saveButton.disabled = true;
-  publishButton.disabled = true;
+  setStatus(
+    mutation.retryNotBefore > 0
+      ? "保存履歴を修復中"
+      : "下書きを保存中",
+    "saving",
+  );
+  syncToolbarControls();
 
   try {
-    const response = await fetch("/admin/gallery/api/draft", {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: adminHeaders(),
-      body: JSON.stringify({
-        baseVersion: manifest.version,
-        mutationId: crypto.randomUUID(),
-        sections: sentContent.sections,
-        items: sentContent.items,
-      }),
-    });
+    await waitForMutationRetry(
+      Math.max(mutation.retryNotBefore - Date.now(), 0),
+    );
+    const response = await fetchMutationWithRepairRetry(
+      "/admin/gallery/api/draft",
+      {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: adminHeaders(),
+        body: mutation.body,
+      },
+    );
 
     if (response.status === 409) {
+      pendingDraftMutation = null;
       const value: unknown = await response.json();
       if (typeof value === "object" && value !== null) {
         const canonical = galleryManifestSchema.safeParse(
@@ -1284,7 +1478,20 @@ async function performSave(): Promise<boolean> {
     }
 
     if (!response.ok) {
-      throw new Error(await errorMessage(response));
+      const retryable = await isRetryableMutationResponse(response);
+      const error = new Error(await errorMessage(response));
+      if (retryable) {
+        pendingDraftMutation = {
+          ...mutation,
+          retryNotBefore: Date.now() + mutationRetryDelay(response),
+        };
+        await reportPendingDraftResult(mutation, error, true);
+        return false;
+      }
+      if (response.status >= 400 && response.status < 500) {
+        pendingDraftMutation = null;
+      }
+      throw error;
     }
 
     const value: unknown = await response.json();
@@ -1293,6 +1500,7 @@ async function performSave(): Promise<boolean> {
         ? (value as Record<string, unknown>)
         : {};
     const saved = galleryManifestSchema.parse(responseRecord.manifest);
+    pendingDraftMutation = null;
     confirmedManifest = structuredClone(saved);
     if (contentFingerprint(cloneContent()) === sentFingerprint) {
       manifest = structuredClone(saved);
@@ -1305,9 +1513,17 @@ async function performSave(): Promise<boolean> {
       saveAgain = true;
     }
     render();
-    setStatus("下書きは同期済み");
+    setStatus(
+      saveAgain ? "新しい変更を再同期中" : "下書きは同期済み",
+      saveAgain ? "saving" : "saved",
+    );
     return true;
   } catch (error) {
+    if (pendingDraftMutation?.body === mutation.body) {
+      await reportPendingDraftResult(mutation, error, false);
+      return false;
+    }
+
     const localContent = cloneContent();
     const canonical = await fetchCanonicalDraft();
     if (canonical) {
@@ -1353,12 +1569,19 @@ async function performSave(): Promise<boolean> {
     return false;
   } finally {
     saveInProgress = false;
-    saveButton.disabled = false;
-    publishButton.disabled = false;
+    syncToolbarControls();
   }
 }
 
 function saveDraft(): Promise<boolean> {
+  const invalidControl = invalidInspectorControl();
+  if (invalidControl) {
+    setStatus(
+      invalidControl.validationMessage || "入力内容を確認してください。",
+      "error",
+    );
+    return Promise.resolve(false);
+  }
   if (saveQueue) {
     saveAgain = true;
     return saveQueue;
@@ -1387,7 +1610,12 @@ function saveDraft(): Promise<boolean> {
 }
 
 async function publish(): Promise<void> {
-  if (isAutoLayoutPreviewing()) {
+  if (
+    isAutoLayoutPreviewing() ||
+    importInProgress ||
+    publishInProgress ||
+    dragState
+  ) {
     return;
   }
   if (saveTimer !== null) {
@@ -1395,23 +1623,34 @@ async function publish(): Promise<void> {
     saveTimer = null;
   }
   const saved = await saveDraft();
-  if (!saved) {
+  if (
+    !saved ||
+    isAutoLayoutPreviewing() ||
+    importInProgress ||
+    publishInProgress ||
+    dragState
+  ) {
     return;
   }
 
-  publishButton.disabled = true;
+  publishInProgress = true;
+  syncToolbarControls();
   setStatus("公開を更新中", "saving");
   const mutationId = crypto.randomUUID();
   try {
-    const response = await fetch("/admin/gallery/api/publish", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: adminHeaders(),
-      body: JSON.stringify({
-        baseVersion: manifest.version,
-        mutationId,
-      }),
+    const body = JSON.stringify({
+      baseVersion: manifest.version,
+      mutationId,
     });
+    const response = await fetchMutationWithRepairRetry(
+      "/admin/gallery/api/publish",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: adminHeaders(),
+        body,
+      },
+    );
     if (!response.ok) {
       throw new Error(await errorMessage(response));
     }
@@ -1424,22 +1663,16 @@ async function publish(): Promise<void> {
     setStatus("公開ページを更新しました");
     showToast("公開しました。Galleryに同じレイアウトが反映されています。");
   } catch (error) {
-    const published = await fetchPublishedManifest();
-    if (
-      published?.lastMutation?.id === mutationId &&
-      published.lastMutation.channel === "published"
-    ) {
-      setStatus("公開ページを更新しました");
-      showToast("公開結果を確認しました。Galleryへ反映されています。");
-      return;
-    }
-
     setStatus("公開できませんでした", "error");
     showToast(
       error instanceof Error ? error.message : "公開処理に失敗しました。",
     );
   } finally {
-    publishButton.disabled = false;
+    publishInProgress = false;
+    syncToolbarControls();
+    if (hasUnconfirmedChanges()) {
+      scheduleSave();
+    }
   }
 }
 
@@ -1611,10 +1844,25 @@ function updateSelected(field: string, value: string): void {
 
   let updated: GalleryManifestItem;
   if (field === "title") {
+    if (value.trim().length === 0) {
+      setStatus("タイトルを入力してください。", "error");
+      return;
+    }
     updated = { ...current, title: value };
   } else if (field === "date") {
+    if (value !== "" && !isValidIsoDate(value)) {
+      setStatus(
+        "撮影日はYYYY-MM-DD形式の正しい日付で入力してください。",
+        "error",
+      );
+      return;
+    }
     updated = { ...current, date: value === "" ? null : value };
   } else if (field === "alt") {
+    if (value.trim().length === 0) {
+      setStatus("代替テキストを入力してください。", "error");
+      return;
+    }
     updated = { ...current, alt: value };
   } else if (
     field === "layout" &&
@@ -1706,8 +1954,7 @@ function imageDate(file: File): string | null {
     return null;
   }
   const value = `${match[1]}-${match[2]}-${match[3]}`;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return Number.isNaN(parsed.valueOf()) ? null : value;
+  return isValidIsoDate(value) ? value : null;
 }
 
 async function imageDimensions(file: File): Promise<{
@@ -1797,6 +2044,15 @@ async function importFiles(inputFiles: readonly File[]): Promise<void> {
   if (importInProgress) {
     return;
   }
+  if (
+    saveInProgress ||
+    publishInProgress ||
+    dragState ||
+    isAutoLayoutPreviewing()
+  ) {
+    showToast("現在の処理が完了してから写真を取り込んでください。");
+    return;
+  }
 
   const availableSlots = 500 - manifest.items.length;
   const files = inputFiles
@@ -1809,9 +2065,7 @@ async function importFiles(inputFiles: readonly File[]): Promise<void> {
   }
 
   importInProgress = true;
-  importButton.disabled = true;
-  saveButton.disabled = true;
-  publishButton.disabled = true;
+  syncToolbarControls();
   pushUndo();
   setStatus(`${String(files.length)}枚を読み込み中`, "saving");
 
@@ -1826,9 +2080,7 @@ async function importFiles(inputFiles: readonly File[]): Promise<void> {
         : manifest.sections.at(-1)?.id;
   if (!targetSectionId) {
     importInProgress = false;
-    importButton.disabled = false;
-    saveButton.disabled = false;
-    publishButton.disabled = false;
+    syncToolbarControls();
     showToast("写真を追加するセクションがありません。");
     return;
   }
@@ -1919,9 +2171,7 @@ async function importFiles(inputFiles: readonly File[]): Promise<void> {
   }
 
   importInProgress = false;
-  importButton.disabled = false;
-  saveButton.disabled = false;
-  publishButton.disabled = false;
+  syncToolbarControls();
   setStatus(`${String(uploaded)}枚を取り込みました`);
   showToast(
     failedIds.size === 0
@@ -1950,6 +2200,16 @@ async function filesInDirectory(
 }
 
 async function chooseFolder(): Promise<void> {
+  if (
+    importInProgress ||
+    saveInProgress ||
+    publishInProgress ||
+    dragState ||
+    isAutoLayoutPreviewing()
+  ) {
+    showToast("現在の処理が完了してからフォルダを選んでください。");
+    return;
+  }
   const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
   if (!picker) {
     folderInput.click();
@@ -2207,17 +2467,23 @@ function rectContainsPoint(bounds: DOMRect, point: DragPoint): boolean {
 }
 
 function eventPoint(event: DragEvent): DragPoint {
-  return { x: event.clientX, y: event.clientY };
+  return {
+    x: event.clientX,
+    y: event.clientY,
+    documentX: event.clientX + window.scrollX,
+    documentY: event.clientY + window.scrollY,
+  };
 }
 
 function canChangeDragIntent(event: DragEvent): boolean {
   if (!dragIntent || !acceptedDragPoint) {
     return true;
   }
+  const point = eventPoint(event);
   return (
     Math.hypot(
-      event.clientX - acceptedDragPoint.x,
-      event.clientY - acceptedDragPoint.y,
+      point.documentX - acceptedDragPoint.documentX,
+      point.documentY - acceptedDragPoint.documentY,
     ) >= dragIntentHysteresis
   );
 }
@@ -2740,12 +3006,14 @@ canvas.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("dragstart", (event) => {
-  if (saveInProgress || importInProgress) {
+  if (saveInProgress || importInProgress || publishInProgress) {
     event.preventDefault();
     showToast(
       importInProgress
         ? "写真の取り込み完了後に移動できます。"
-        : "下書きの保存完了後に移動できます。",
+        : publishInProgress
+          ? "公開処理の完了後に移動できます。"
+          : "下書きの保存完了後に移動できます。",
     );
     return;
   }
@@ -2766,6 +3034,7 @@ canvas.addEventListener("dragstart", (event) => {
     dragState = { kind: "item", id, snapshot: cloneContent() };
     dragIntent = null;
     acceptedDragPoint = null;
+    syncToolbarControls();
     const ghost = createDragGhost(dragState);
     if (event.dataTransfer && ghost) {
       event.dataTransfer.setDragImage(ghost, 28, 24);
@@ -2801,6 +3070,7 @@ canvas.addEventListener("dragstart", (event) => {
   dragState = { kind: "section", id, snapshot: cloneContent() };
   dragIntent = null;
   acceptedDragPoint = null;
+  syncToolbarControls();
   const ghost = createDragGhost(dragState);
   if (event.dataTransfer && ghost) {
     event.dataTransfer.setDragImage(ghost, 28, 24);
@@ -2928,6 +3198,9 @@ inspector.addEventListener("input", (event) => {
   ) {
     return;
   }
+  if (!validateInspectorControl(target)) {
+    return;
+  }
   const field = target.dataset.inspectorInput;
   if (field) {
     updateSelected(field, target.value);
@@ -3004,6 +3277,20 @@ previewButton.addEventListener("click", () => {
   previewButton.ariaPressed = String(previewOnly);
   previewButton.textContent = previewOnly ? "編集に戻る" : "表示だけ";
   render();
+});
+
+window.addEventListener("beforeunload", (event) => {
+  if (
+    !hasUnconfirmedChanges() &&
+    !invalidInspectorControl() &&
+    !importInProgress &&
+    !saveInProgress &&
+    !publishInProgress
+  ) {
+    return;
+  }
+  event.preventDefault();
+  event.returnValue = "";
 });
 
 inspector.inert = true;

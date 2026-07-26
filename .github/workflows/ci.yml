@@ -19,6 +19,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run build:preview
 
   browser:
     runs-on: ubuntu-latest

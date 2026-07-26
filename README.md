@@ -54,6 +54,7 @@ npm test            # Vitest
 npm run test:e2e    # Playwright + axe（Chromiumが必要）
 npm run audit:lighthouse # 起動中のlocalhost:5173を主要4ページ監査
 npm run build       # 画像生成、Workers型生成、型検査、Vite build
+npm run build:preview # Preview環境をbuildし、生成されたbinding設定を検証
 npm run check       # Vitest + production build
 npm run deploy      # build後にCloudflare Workersへデプロイ
 ```
@@ -154,9 +155,11 @@ published manifestへ切り替えます。両方は `manifests/state.json` に�
    [`npm run deploy`](https://developers.cloudflare.com/workers/wrangler/commands/workers/#deploy)
    します。
 
-`workers_dev` とPreview URLは管理境界の迂回を防ぐため無効です。ローカルの
-`http://localhost` だけはproduction buildに含まれない開発用bypassを使います。
-必要なら `.dev.vars.example` を `.dev.vars` へコピーして設定してください。
+本番のtop-level設定では `workers_dev` とPreview URLを管理境界の迂回防止のため
+無効にしています。`env.preview` だけがAccess保護されたVersion Preview URLを
+有効にします。ローカルの `http://localhost` だけはproduction buildに含まれない
+開発用bypassを使います。必要なら `.dev.vars.example` を `.dev.vars` へコピーして
+設定してください。
 
 ## セキュリティ
 
@@ -196,11 +199,54 @@ Cloudflare Dashboardの **Workers & Pages → Create → Import a repository**
 依存関係のインストールはWorkers Buildsに任せ、Node.jsのビルド環境変数
 `NODE_VERSION=24` を設定します。Worker設定は `wrangler.jsonc` が正です。
 `main` は本番デプロイ、同一リポジトリ内の他ブランチはVersion Preview URLへの
-アップロードに限定します。
+アップロードに限定します。Preview versionは本番と同じ `chanya-jp` Worker上で
+動きますが、`chanya-gallery-preview` R2 bucketへbindingするため、本番の下書き・
+公開manifest・画像を変更しません。Worker名を共通にするため、設定済みのWorker
+Secretはそのまま使えます。初回だけPreview用bucketを作成します。
+
+```sh
+npx wrangler r2 bucket create chanya-gallery-preview
+```
+
+Preview URLを初めて使うときは、Cloudflare Dashboardの
+**Workers & Pages → chanya-jp → Settings → Domains & Routes → Preview URLs**
+で **Enable Cloudflare Access** を選びます。続けて
+**Manage Cloudflare Access** から対象applicationを開き、本番と同じAllow policy
+（Include = 管理者のGitHub primary email、Require = Login Methods / GitHub）を
+割り当て、利用できるLogin methodをGitHubだけにします。
+
+対象applicationに表示される **Application Audience (AUD) tag** と
+`wrangler.jsonc` のtop-level `CF_ACCESS_AUD` を比較します。現在のように同じなら
+変更不要です。異なる場合だけ、production側の値は変更せず
+`env.preview.vars.CF_ACCESS_AUD` をPreview applicationのAUDへ変更します。
+
+設定確認にはBranch Preview URLを使います。未ログイン状態で次を実行すると
+Cloudflare Accessへの `302` と `Location` headerが返り、そのURLをブラウザで開いて
+GitHubログイン後にGallery Workbenchが表示されれば完了です。
+
+```sh
+curl -I https://<branch>-chanya-jp.<workers-subdomain>.workers.dev/admin/gallery/
+npm run build:preview
+```
+
+`build:preview` は生成された `dist/chanya_jp/wrangler.json` を検査し、Worker名、
+`targetEnvironment`、Preview URL設定、R2 bucket、`GALLERY_ENVIRONMENT` のどれかが
+Preview用でなければ失敗します。
+
+Cloudflare Vite pluginはenvironmentをbuild時に確定します。Workers Buildsでは
+`WORKERS_CI_BRANCH`を見て、`main`以外なら自動的に `preview` environmentでbuild
+します。ローカルから手動でVersion Previewを作る場合は次を使います。
+
+```sh
+npm run upload:preview
+```
+
+top-level設定で誤って作られたVersion Previewは防御的にread-onlyとなり、
+`chanya.jp`以外のhostから本番Galleryへ書き込めません。
 
 外部forkのpull requestにはCloudflareの認証情報を渡しません。
-GitHub Actionsはread-only権限で `npm ci`、型検査、Vitest、build、
-Playwrightだけを実行します。
+GitHub Actionsはread-only権限で `npm ci`、型検査、Vitest、production / preview
+build、生成されたPreview binding設定の検査、Playwrightだけを実行します。
 
 本番は既存のproxied A / AAAAを保持したまま `chanya.jp/*` のWorker Routeで
 配信します。Custom Domainへ移行する場合は、MX / TXTと `www` のレコードを

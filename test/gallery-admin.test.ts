@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import {
   defaultGallerySectionId,
@@ -7,6 +7,10 @@ import {
   parseGalleryManifest,
   seedGalleryManifest,
 } from "../src/gallery/manifest";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("gallery manifest", () => {
   it("既存42枚を検証済みのvisual-first manifestへ変換する", () => {
@@ -181,6 +185,32 @@ describe("gallery manifest", () => {
 describe("gallery admin boundary", () => {
   const managedKey = "7cc2ac97-23d5-46fd-8b33-5f45275474dc";
 
+  function configuredGalleryEnv(
+    environment: "preview" | "production",
+  ): CloudflareBindings {
+    return {
+      GALLERY_BUCKET: {} as R2Bucket,
+      IMAGES: {} as ImagesBinding,
+      CF_ACCESS_TEAM_DOMAIN:
+        "https://chanyakushima.cloudflareaccess.com",
+      CF_ACCESS_AUD:
+        "08f4b21524ee5e79efaaa746e84959d1270a483459856b45c9aeb180e4c0941c",
+      GALLERY_ENVIRONMENT: environment,
+      GALLERY_CANONICAL_HOST: "chanya.jp",
+      GALLERY_ADMIN_EMAIL: "admin@example.com",
+    };
+  }
+
+  function mockR2Bucket(overrides: object): R2Bucket {
+    return overrides as R2Bucket;
+  }
+
+  function mockImagesBinding(
+    overrides: object,
+  ): ImagesBinding {
+    return overrides as ImagesBinding;
+  }
+
   it("localhostだけは開発用Workbenchを表示する", async () => {
     const response = await app.request("http://localhost/admin/gallery/");
     const body = await response.text();
@@ -213,6 +243,65 @@ describe("gallery admin boundary", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+  });
+
+  it.each([
+    ["PUT", "/admin/gallery/api/draft"],
+    ["POST", "/admin/gallery/api/publish"],
+    ["POST", "/admin/gallery/api/assets"],
+    ["DELETE", `/admin/gallery/api/assets/${managedKey}`],
+  ])(
+    "production bindingのworkers.devでは%s %sをAccess検証前に拒否する",
+    async (method, path) => {
+      const response = await app.request(
+        `https://branch-chanya-jp.example.workers.dev${path}`,
+        { method },
+        configuredGalleryEnv("production"),
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: "Gallery mutations are disabled on this host.",
+      });
+    },
+  );
+
+  it("preview environmentはworkers.devの書込みをhost guardで許可する", async () => {
+    const response = await app.request(
+      "https://branch-chanya-jp.example.workers.dev/admin/gallery/api/draft",
+      { method: "PUT" },
+      configuredGalleryEnv("preview"),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Cloudflare Access token is missing.",
+    });
+  });
+
+  it("production bindingの非canonical hostでは公開GalleryもR2を読まない", async () => {
+    const get = vi.fn(async () => {
+      throw new Error("Production R2 must not be read from a preview host.");
+    });
+    const env = {
+      ...configuredGalleryEnv("production"),
+      GALLERY_BUCKET: mockR2Bucket({ get }),
+    };
+
+    const gallery = await app.request(
+      "https://branch-chanya-jp.example.workers.dev/gallery/",
+      undefined,
+      env,
+    );
+    const image = await app.request(
+      `https://branch-chanya-jp.example.workers.dev/media/gallery-managed/${managedKey}/640.webp`,
+      undefined,
+      env,
+    );
+
+    expect(gallery.status).toBe(200);
+    expect(image.status).toBe(404);
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("更新APIはOrigin・管理ヘッダー・CSRFなしの要求を拒否する", async () => {
@@ -261,6 +350,58 @@ describe("gallery admin boundary", () => {
     );
 
     expect(response.status).toBe(503);
+  });
+
+  it("state commit後の履歴保存失敗をretryable 503として返す", async () => {
+    const page = await app.request("http://localhost/admin/gallery/");
+    const cookie = page.headers
+      .get("set-cookie")
+      ?.match(/gallery_csrf=([^;]+)/u)?.[1];
+    expect(cookie).toBeDefined();
+
+    const get = vi.fn(async () => null);
+    const put = vi.fn(async (key: string) => {
+      if (key.startsWith("mutations/draft/")) {
+        throw new Error("Injected mutation receipt failure.");
+      }
+      return { etag: "stored-etag" } as R2Object;
+    });
+    const env = {
+      ...configuredGalleryEnv("production"),
+      GALLERY_BUCKET: mockR2Bucket({ get, put }),
+    };
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const response = await app.request(
+        "http://localhost/admin/gallery/api/draft",
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "http://localhost",
+            Cookie: `gallery_csrf=${cookie}`,
+            "X-Gallery-Admin": "1",
+            "X-Gallery-CSRF": decodeURIComponent(cookie ?? ""),
+          },
+          body: JSON.stringify({
+            baseVersion: 1,
+            mutationId: crypto.randomUUID(),
+            sections: seedGalleryManifest().sections,
+            items: seedGalleryManifest().items,
+          }),
+        },
+        env,
+      );
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("1");
+      await expect(response.json()).resolves.toMatchObject({
+        retryable: true,
+      });
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("公開Galleryをsection順と所属写真順で描画する", async () => {
@@ -356,6 +497,129 @@ describe("gallery admin boundary", () => {
     expect(response.status).toBe(404);
     expect(get).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledWith("manifests/state.json");
+  });
+
+  it("公開managed画像はmembershipを毎回確認し、etag単位の変換cacheを使う", async () => {
+    const seed = seedGalleryManifest();
+    const first = seed.items[0];
+    if (!first) {
+      throw new Error("The seed gallery must contain an item.");
+    }
+    const published = galleryManifestSchema.parse({
+      ...seed,
+      items: [
+        {
+          ...first,
+          id: managedKey,
+          source: { kind: "managed", key: managedKey },
+        },
+      ],
+    });
+    const assetKey = `assets/${managedKey}`;
+    const get = vi.fn(async (key: string) => {
+      if (key === "manifests/state.json") {
+        return {
+          etag: "state-etag",
+          json: async () => ({
+            schemaVersion: 1,
+            draft: published,
+            published,
+          }),
+        };
+      }
+      if (key === assetKey) {
+        return {
+          etag: "source-etag",
+          body: new Blob(["source-image"]).stream(),
+        };
+      }
+      return null;
+    });
+    const head = vi.fn(async (key: string) =>
+      key === assetKey ? { etag: "source-etag" } : null,
+    );
+    const output = vi.fn(async () => ({
+      response: () =>
+        new Response("transformed-image", {
+          headers: { "Content-Type": "image/webp" },
+        }),
+    }));
+    const transform = vi.fn(() => ({ output }));
+    const input = vi.fn(() => ({ transform }));
+    const env = {
+      ...configuredGalleryEnv("production"),
+      GALLERY_BUCKET: mockR2Bucket({ get, head }),
+      IMAGES: mockImagesBinding({ input }),
+    };
+
+    let cachedResponse: Response | undefined;
+    const cacheMatch = vi.fn(async () => cachedResponse?.clone());
+    const cachePut = vi.fn(async (_key: Request, response: Response) => {
+      cachedResponse = response.clone();
+    });
+    vi.stubGlobal("caches", {
+      default: {
+        match: cacheMatch,
+        put: cachePut,
+      },
+    });
+    const pending: Promise<unknown>[] = [];
+    const executionContext = {
+      waitUntil(promise: Promise<unknown>) {
+        pending.push(promise);
+      },
+      passThroughOnException() {},
+    } as ExecutionContext;
+    const imageUrl =
+      `https://chanya.jp/media/gallery-managed/${managedKey}/640.webp`;
+
+    const uncached = await app.request(
+      imageUrl,
+      undefined,
+      env,
+      executionContext,
+    );
+    const transformedEtag = uncached.headers.get("etag");
+    expect(uncached.status).toBe(200);
+    expect(await uncached.text()).toBe("transformed-image");
+    expect(transformedEtag).toContain(
+      "source-etag-640.webp-v1-fit-scale-down-q86",
+    );
+    await Promise.all(pending.splice(0));
+
+    const cached = await app.request(
+      imageUrl,
+      undefined,
+      env,
+      executionContext,
+    );
+    expect(cached.status).toBe(200);
+    expect(cached.headers.get("cache-control")).toBe(
+      "public, max-age=0, must-revalidate",
+    );
+    expect(await cached.text()).toBe("transformed-image");
+
+    const notModified = await app.request(
+      imageUrl,
+      {
+        headers: { "If-None-Match": transformedEtag ?? "" },
+      },
+      env,
+      executionContext,
+    );
+    expect(notModified.status).toBe(304);
+
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(output).toHaveBeenCalledTimes(1);
+    expect(cacheMatch).toHaveBeenCalledTimes(2);
+    expect(cachePut).toHaveBeenCalledTimes(1);
+    expect(head).toHaveBeenCalledTimes(3);
+    expect(
+      get.mock.calls.filter(([key]) => key === "manifests/state.json"),
+    ).toHaveLength(3);
+    expect(
+      get.mock.calls.filter(([key]) => key === assetKey),
+    ).toHaveLength(1);
   });
 
   it("下書きpreviewはAccess配下の専用routeだけを使う", async () => {

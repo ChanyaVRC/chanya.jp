@@ -717,6 +717,7 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
             type="text"
             maxLength={120}
             autoComplete="off"
+            required
             data-inspector-input="title"
           />
         </label>
@@ -729,6 +730,7 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
           <textarea
             maxLength={300}
             rows={4}
+            required
             data-inspector-input="alt"
           />
         </label>
@@ -816,6 +818,7 @@ export const AdminGalleryPage: FC<AdminGalleryPageProps> = ({
             type="text"
             maxLength={120}
             autoComplete="off"
+            required
             data-section-input="title"
           />
         </label>

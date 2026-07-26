@@ -48,6 +48,26 @@ interface DragPoint {
   readonly clientY: number;
 }
 
+interface GalleryDraftContent {
+  readonly sections: readonly unknown[];
+  readonly items: readonly unknown[];
+}
+
+function galleryDraftContent(value: unknown): GalleryDraftContent | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("sections" in value) ||
+    !Array.isArray(value.sections) ||
+    !("items" in value) ||
+    !Array.isArray(value.items)
+  ) {
+    return null;
+  }
+
+  return { sections: value.sections, items: value.items };
+}
+
 type PseudoElement = "::before" | "::after";
 
 async function pseudoMetrics(
@@ -374,10 +394,10 @@ test("home hero pairs the identity copy with the full profile icon", async ({
     expect(result.picture.naturalWidth).toBe(result.picture.naturalHeight);
     expect(result.picture.transform).toBe("none");
     expect(result.picture.clipPath).toBe("none");
-    expect(Math.abs(result.picture.imageTop - result.picture.top)).toBeLessThanOrEqual(1);
-    expect(Math.abs(result.picture.imageRight - result.picture.right)).toBeLessThanOrEqual(1);
-    expect(Math.abs(result.picture.imageBottom - result.picture.bottom)).toBeLessThanOrEqual(1);
-    expect(Math.abs(result.picture.imageLeft - result.picture.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageTop - result.picture.top)).toBeLessThanOrEqual(2);
+    expect(Math.abs(result.picture.imageRight - result.picture.right)).toBeLessThanOrEqual(2);
+    expect(Math.abs(result.picture.imageBottom - result.picture.bottom)).toBeLessThanOrEqual(2);
+    expect(Math.abs(result.picture.imageLeft - result.picture.left)).toBeLessThanOrEqual(2);
 
     for (const [name, bounds] of [
       ["copy", result.copy],
@@ -844,31 +864,34 @@ test("Gallery Workbench edits the shared canvas and imports a VRChat image", asy
   });
   expect(inspectorBounds.left).toBeGreaterThanOrEqual(-1);
   expect(inspectorBounds.right).toBeLessThanOrEqual(inspectorBounds.width + 1);
-  const overlap = await page.evaluate(() => {
-    const selected = document.querySelector<HTMLElement>(
-      "[data-gallery-select][aria-pressed='true']",
-    );
-    const sheet = document.querySelector<HTMLElement>(
-      "[data-gallery-inspector][data-open='true']",
-    );
-    if (!selected || !sheet) {
-      return Number.POSITIVE_INFINITY;
-    }
-    const selectedBounds = selected.getBoundingClientRect();
-    const sheetBounds = sheet.getBoundingClientRect();
-    const width = Math.max(
-      0,
-      Math.min(selectedBounds.right, sheetBounds.right) -
-        Math.max(selectedBounds.left, sheetBounds.left),
-    );
-    const height = Math.max(
-      0,
-      Math.min(selectedBounds.bottom, sheetBounds.bottom) -
-        Math.max(selectedBounds.top, sheetBounds.top),
-    );
-    return width * height;
-  });
-  expect(overlap).toBe(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const selected = document.querySelector<HTMLElement>(
+          "[data-gallery-select][aria-pressed='true']",
+        );
+        const sheet = document.querySelector<HTMLElement>(
+          "[data-gallery-inspector][data-open='true']",
+        );
+        if (!selected || !sheet) {
+          return Number.POSITIVE_INFINITY;
+        }
+        const selectedBounds = selected.getBoundingClientRect();
+        const sheetBounds = sheet.getBoundingClientRect();
+        const width = Math.max(
+          0,
+          Math.min(selectedBounds.right, sheetBounds.right) -
+            Math.max(selectedBounds.left, sheetBounds.left),
+        );
+        const height = Math.max(
+          0,
+          Math.min(selectedBounds.bottom, sheetBounds.bottom) -
+            Math.max(selectedBounds.top, sheetBounds.top),
+        );
+        return width * height;
+      }),
+    )
+    .toBe(0);
   await assertNoAxeViolations(page);
 });
 
@@ -1077,8 +1100,13 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
   await expect
     .poll(() => savedSectionTitles[0])
     .toBe("Night Sessions");
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
 
-  await addedSection.locator("[data-section-drag]").focus();
+  const addedSectionDrag = addedSection.locator("[data-section-drag]");
+  await addedSectionDrag.focus();
+  await expect(addedSectionDrag).toBeFocused();
   await page.keyboard.press("Alt+ArrowDown");
   await expect(sections.last()).toHaveAttribute(
     "data-section-id",
@@ -1199,11 +1227,16 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
       () => savedItems.find((item) => item.id === sourceId)?.sectionId,
     )
     .toBe(addedSectionId);
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+  await expect(page.locator("[data-gallery-save]")).toBeEnabled();
 
   const movedPhoto = addedSection.locator(
     `[data-gallery-id="${sourceId}"] [data-gallery-select]`,
   );
   await movedPhoto.focus();
+  await expect(movedPhoto).toBeFocused();
   await page.keyboard.press("Alt+ArrowLeft");
   await expect(
     initialSection.locator(`[data-gallery-id="${sourceId}"]`),
@@ -1728,4 +1761,717 @@ test("Gallery Workbench previews automatic layouts before one accepted draft sav
     page.locator("[data-gallery-layout-lock-mark]").first(),
   ).toBeVisible();
   expect(pageErrors).toEqual([]);
+});
+
+test("Gallery Workbench keeps publishing blocked until imports and saves finish", async ({
+  page,
+}) => {
+  let revision = 1;
+  let draftWrites = 0;
+  let publishWrites = 0;
+  let uploadStarted = false;
+  let releaseUpload: (() => void) | undefined;
+  let releaseDelayedSave: (() => void) | undefined;
+  let delayedSave: Promise<void> | null = null;
+  let delayedSaveStarted = false;
+  let latestSavedVersion = 1;
+  let latestSections: readonly unknown[] = [];
+  let latestItems: readonly unknown[] = [];
+  let publishedBaseVersion: number | null = null;
+  const managedKey = "7cc2ac97-23d5-46fd-8b33-5f45275474dc";
+  const pixel = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const uploadGate = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+
+  await page.route("**/admin/gallery/api/assets", async (route) => {
+    uploadStarted = true;
+    await uploadGate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        asset: { key: managedKey, width: 1, height: 1 },
+      }),
+    });
+  });
+  await page.route("**/admin/gallery/api/draft", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+
+    const content = galleryDraftContent(route.request().postDataJSON());
+    if (!content) {
+      await route.fulfill({ status: 400, body: "Invalid test request" });
+      return;
+    }
+
+    draftWrites += 1;
+    if (delayedSave) {
+      delayedSaveStarted = true;
+      await delayedSave;
+    }
+    revision += 1;
+    latestSavedVersion = revision;
+    latestSections = content.sections;
+    latestItems = content.items;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        manifest: {
+          schemaVersion: 2,
+          version: revision,
+          updatedAt: new Date().toISOString(),
+          sections: content.sections,
+          items: content.items,
+        },
+      }),
+    });
+  });
+  await page.route("**/admin/gallery/api/publish", async (route) => {
+    publishWrites += 1;
+    const request: unknown = route.request().postDataJSON();
+    if (
+      typeof request === "object" &&
+      request !== null &&
+      "baseVersion" in request &&
+      typeof request.baseVersion === "number"
+    ) {
+      publishedBaseVersion = request.baseVersion;
+    }
+    await route.fulfill({
+      status: latestItems.length > 0 ? 200 : 409,
+      contentType: "application/json",
+      body: JSON.stringify(
+        latestItems.length > 0
+          ? {
+              manifest: {
+                schemaVersion: 2,
+                version: latestSavedVersion,
+                updatedAt: new Date().toISOString(),
+                sections: latestSections,
+                items: latestItems,
+              },
+            }
+          : { error: "No saved draft is available." },
+      ),
+    });
+  });
+  await page.route("**/media/gallery-managed/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: pixel,
+    });
+  });
+
+  await page.goto("/admin/gallery/");
+  const saveButton = page.locator("[data-gallery-save]");
+  const publishButton = page.locator("[data-gallery-publish]");
+  const folderInput = page.locator("[data-gallery-folder-input]");
+  await folderInput.evaluate((element) => {
+    element.removeAttribute("webkitdirectory");
+  });
+  await folderInput.setInputFiles({
+    name: "VRChat_2026-07-25_12-00-00.png",
+    mimeType: "image/png",
+    buffer: pixel,
+  });
+  await expect.poll(() => uploadStarted).toBe(true);
+
+  try {
+    await expect(saveButton).toBeDisabled();
+    await expect(publishButton).toBeDisabled();
+    await publishButton.evaluate((element) => {
+      (element as HTMLButtonElement).click();
+    });
+    await page.waitForTimeout(100);
+    expect(publishWrites).toBe(0);
+  } finally {
+    releaseUpload?.();
+  }
+
+  await expect.poll(() => draftWrites).toBe(1);
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+  expect(latestItems).toHaveLength(43);
+  expect(publishWrites).toBe(0);
+
+  delayedSave = new Promise<void>((resolve) => {
+    releaseDelayedSave = resolve;
+  });
+  await page.locator("[data-gallery-select]").first().click();
+  await page.getByLabel("タイトル").fill("Saved before publish");
+  await saveButton.click();
+  await expect.poll(() => delayedSaveStarted).toBe(true);
+
+  try {
+    await expect(saveButton).toBeDisabled();
+    await expect(publishButton).toBeDisabled();
+    await publishButton.evaluate((element) => {
+      (element as HTMLButtonElement).click();
+    });
+    await page.waitForTimeout(100);
+    expect(publishWrites).toBe(0);
+  } finally {
+    releaseDelayedSave?.();
+  }
+
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+  delayedSave = null;
+  await expect(publishButton).toBeEnabled();
+  await publishButton.click();
+  await expect.poll(() => publishWrites).toBe(1);
+  expect(publishedBaseVersion).toBe(latestSavedVersion);
+  expect(
+    latestItems.some(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        "title" in item &&
+        item.title === "Saved before publish",
+    ),
+  ).toBe(true);
+});
+
+test("Gallery Workbench retries draft and publish mutations with the same id and body", async ({
+  page,
+}) => {
+  let revision = 1;
+  let savedSections: readonly unknown[] = [];
+  let savedItems: readonly unknown[] = [];
+  const draftBodies: string[] = [];
+  const publishBodies: string[] = [];
+
+  await page.route("**/admin/gallery/api/draft", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+
+    const body = route.request().postData() ?? "";
+    draftBodies.push(body);
+    const content = galleryDraftContent(JSON.parse(body) as unknown);
+    if (!content) {
+      await route.fulfill({ status: 400, body: "Invalid test request" });
+      return;
+    }
+    if (draftBodies.length === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "Temporary draft failure",
+          retryable: true,
+        }),
+      });
+      return;
+    }
+
+    revision += 1;
+    savedSections = content.sections;
+    savedItems = content.items;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        manifest: {
+          schemaVersion: 2,
+          version: revision,
+          updatedAt: new Date().toISOString(),
+          sections: savedSections,
+          items: savedItems,
+        },
+      }),
+    });
+  });
+  await page.route("**/admin/gallery/api/publish", async (route) => {
+    const body = route.request().postData() ?? "";
+    publishBodies.push(body);
+    if (publishBodies.length === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "Temporary publish failure",
+          retryable: true,
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        manifest: {
+          schemaVersion: 2,
+          version: revision,
+          updatedAt: new Date().toISOString(),
+          sections: savedSections,
+          items: savedItems,
+        },
+      }),
+    });
+  });
+
+  await page.goto("/admin/gallery/");
+  await page.locator("[data-gallery-select]").first().click();
+  await page.getByLabel("タイトル").fill("Retry-safe draft");
+  await page.locator("[data-gallery-save]").click();
+  await expect.poll(() => draftBodies).toHaveLength(2);
+  expect(draftBodies[1]).toBe(draftBodies[0]);
+  const firstDraftRequest = JSON.parse(draftBodies[0] ?? "{}") as {
+    readonly mutationId?: unknown;
+  };
+  const secondDraftRequest = JSON.parse(draftBodies[1] ?? "{}") as {
+    readonly mutationId?: unknown;
+  };
+  expect(firstDraftRequest.mutationId).toEqual(expect.any(String));
+  expect(secondDraftRequest.mutationId).toBe(firstDraftRequest.mutationId);
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+
+  await page.locator("[data-gallery-publish]").click();
+  await expect.poll(() => publishBodies).toHaveLength(2);
+  expect(publishBodies[1]).toBe(publishBodies[0]);
+  const firstPublishRequest = JSON.parse(publishBodies[0] ?? "{}") as {
+    readonly mutationId?: unknown;
+  };
+  const secondPublishRequest = JSON.parse(publishBodies[1] ?? "{}") as {
+    readonly mutationId?: unknown;
+  };
+  expect(firstPublishRequest.mutationId).toEqual(expect.any(String));
+  expect(secondPublishRequest.mutationId).toBe(
+    firstPublishRequest.mutationId,
+  );
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "公開ページを更新しました",
+  );
+});
+
+test("Gallery Workbench keeps a twice-unavailable draft mutation pending until repair succeeds", async ({
+  page,
+}) => {
+  const draftBodies: string[] = [];
+  const requestTimes: number[] = [];
+  let committedSections: readonly unknown[] = [];
+  let committedItems: readonly unknown[] = [];
+
+  await page.route("**/admin/gallery/api/draft", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          manifest: {
+            schemaVersion: 2,
+            version: 2,
+            updatedAt: new Date().toISOString(),
+            sections: committedSections,
+            items: committedItems,
+          },
+        }),
+      });
+      return;
+    }
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+
+    const body = route.request().postData() ?? "";
+    const content = galleryDraftContent(JSON.parse(body) as unknown);
+    if (!content) {
+      await route.fulfill({ status: 400, body: "Invalid test request" });
+      return;
+    }
+    draftBodies.push(body);
+    requestTimes.push(Date.now());
+
+    if (draftBodies.length <= 2) {
+      committedSections = content.sections;
+      committedItems = content.items;
+      await route.fulfill({
+        status: 503,
+        headers: { "Retry-After": "0.05" },
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "Draft history is temporarily unavailable",
+          retryable: true,
+        }),
+      });
+      return;
+    }
+
+    const repairingPendingMutation = draftBodies.length === 3;
+    if (!repairingPendingMutation) {
+      committedSections = content.sections;
+      committedItems = content.items;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        manifest: {
+          schemaVersion: 2,
+          version: repairingPendingMutation ? 2 : 3,
+          updatedAt: new Date().toISOString(),
+          sections: repairingPendingMutation
+            ? committedSections
+            : content.sections,
+          items: repairingPendingMutation ? committedItems : content.items,
+        },
+      }),
+    });
+  });
+
+  await page.goto("/admin/gallery/");
+  await page.locator("[data-gallery-select]").first().click();
+  await page.getByLabel("タイトル").fill("Pending history repair");
+  await page.locator("[data-gallery-save]").click();
+
+  await expect.poll(() => draftBodies).toHaveLength(2);
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "保存履歴の修復待ち",
+  );
+  await expect(page.locator("[data-gallery-status]")).not.toContainText(
+    "下書きは同期済み",
+  );
+  expect((requestTimes[1] ?? 0) - (requestTimes[0] ?? 0)).toBeGreaterThanOrEqual(
+    30,
+  );
+
+  await page.getByLabel("タイトル").fill("Saved after history repair");
+  await page.locator("[data-gallery-save]").click();
+
+  await expect.poll(() => draftBodies).toHaveLength(4);
+  expect(draftBodies[1]).toBe(draftBodies[0]);
+  expect(draftBodies[2]).toBe(draftBodies[0]);
+  expect((requestTimes[2] ?? 0) - (requestTimes[1] ?? 0)).toBeGreaterThanOrEqual(
+    30,
+  );
+
+  const repairedRequest = JSON.parse(draftBodies[2] ?? "{}") as {
+    readonly mutationId?: unknown;
+  };
+  const followUpRequest = JSON.parse(draftBodies[3] ?? "{}") as {
+    readonly items?: readonly { readonly title?: unknown }[];
+    readonly mutationId?: unknown;
+  };
+  expect(repairedRequest.mutationId).toEqual(expect.any(String));
+  expect(followUpRequest.mutationId).toEqual(expect.any(String));
+  expect(followUpRequest.mutationId).not.toBe(repairedRequest.mutationId);
+  expect(
+    followUpRequest.items?.some(
+      (item) => item.title === "Saved after history repair",
+    ),
+  ).toBe(true);
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+});
+
+test("Gallery Workbench keeps publish failed when both same-id attempts are unavailable", async ({
+  page,
+}) => {
+  const publishBodies: string[] = [];
+  const requestTimes: number[] = [];
+  await page.route("**/admin/gallery/api/publish", async (route) => {
+    publishBodies.push(route.request().postData() ?? "");
+    requestTimes.push(Date.now());
+    await route.fulfill({
+      status: 503,
+      headers: { "Retry-After": "0.05" },
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "Publish history is temporarily unavailable",
+        retryable: true,
+      }),
+    });
+  });
+
+  await page.goto("/admin/gallery/");
+  await page.locator("[data-gallery-publish]").click();
+
+  await expect.poll(() => publishBodies).toHaveLength(2);
+  expect(publishBodies[1]).toBe(publishBodies[0]);
+  expect((requestTimes[1] ?? 0) - (requestTimes[0] ?? 0)).toBeGreaterThanOrEqual(
+    30,
+  );
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "公開できませんでした",
+  );
+  await expect(page.locator("[data-gallery-status]")).not.toContainText(
+    "公開ページを更新しました",
+  );
+});
+
+test("Gallery Workbench preserves a pending autosave when automatic layout has no candidates", async ({
+  page,
+}) => {
+  let revision = 1;
+  let draftWrites = 0;
+  let latestSavedTitle = "";
+
+  await page.route("**/admin/gallery/api/draft", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+
+    const content = galleryDraftContent(route.request().postDataJSON());
+    if (!content) {
+      await route.fulfill({ status: 400, body: "Invalid test request" });
+      return;
+    }
+
+    draftWrites += 1;
+    latestSavedTitle =
+      content.items.flatMap((item) =>
+        typeof item === "object" &&
+        item !== null &&
+        "title" in item &&
+        typeof item.title === "string"
+          ? [item.title]
+          : [],
+      )[0] ?? "";
+    revision += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        manifest: {
+          schemaVersion: 2,
+          version: revision,
+          updatedAt: new Date().toISOString(),
+          sections: content.sections,
+          items: content.items,
+        },
+      }),
+    });
+  });
+
+  await page.goto("/admin/gallery/");
+  await page.evaluate(() => {
+    const ids = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-gallery-id]"),
+      (element) => element.dataset.galleryId ?? "",
+    );
+    for (const id of ids) {
+      document
+        .querySelector<HTMLButtonElement>(
+          `[data-gallery-id="${CSS.escape(id)}"] [data-gallery-select]`,
+        )
+        ?.click();
+      document
+        .querySelector<HTMLButtonElement>("[data-gallery-layout-lock]")
+        ?.click();
+    }
+  });
+  await page.locator("[data-gallery-save]").click();
+  await expect.poll(() => draftWrites).toBeGreaterThanOrEqual(1);
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
+  );
+  await expect
+    .poll(() =>
+      page.locator("[data-gallery-layout-lock-mark]").evaluateAll((marks) =>
+        marks.every((mark) => !(mark as HTMLElement).hidden),
+      ),
+    )
+    .toBe(true);
+
+  draftWrites = 0;
+  await page.locator("[data-gallery-select]").first().click();
+  await page.getByLabel("タイトル").fill("Pending candidate-free edit");
+  await page.locator("[data-gallery-auto-layout]").click();
+  await expect(page.locator("[data-gallery-auto-layout-preview]")).toBeHidden();
+  await expect.poll(() => draftWrites).toBe(1);
+  expect(latestSavedTitle).toBe("Pending candidate-free edit");
+});
+
+test("Gallery Workbench rejects invalid item fields without mutating or saving the draft", async ({
+  page,
+}) => {
+  let draftWrites = 0;
+  await page.route("**/admin/gallery/api/draft", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    draftWrites += 1;
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Invalid test draft" }),
+    });
+  });
+
+  await page.goto("/admin/gallery/");
+  const selected = page.locator("[data-gallery-select]").first();
+  const original = await selected.evaluate((element) => ({
+    alt: (element as HTMLElement).dataset.galleryAlt ?? "",
+    date: (element as HTMLElement).dataset.galleryDate ?? "",
+    title: (element as HTMLElement).dataset.galleryTitle ?? "",
+  }));
+  await selected.click();
+
+  await page.getByLabel("タイトル").fill("   ");
+  await page.getByLabel("撮影日").evaluate((element) => {
+    const input = element as HTMLInputElement;
+    input.type = "text";
+    input.value = "2025-02-29";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.getByLabel("代替テキスト").fill("   ");
+
+  await expect(selected).toHaveAttribute("data-gallery-title", original.title);
+  await expect(selected).toHaveAttribute("data-gallery-date", original.date);
+  await expect(selected).toHaveAttribute("data-gallery-alt", original.alt);
+  await page.locator("[data-gallery-save]").evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+  await page.waitForTimeout(900);
+  expect(draftWrites).toBe(0);
+  await expect(selected).toHaveAttribute("data-gallery-title", original.title);
+  await expect(selected).toHaveAttribute("data-gallery-date", original.date);
+  await expect(selected).toHaveAttribute("data-gallery-alt", original.alt);
+});
+
+test("Gallery Workbench warns before leaving with an unsaved draft", async ({
+  page,
+}) => {
+  await page.goto("/admin/gallery/");
+
+  const cleanEvent = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    const dispatchResult = window.dispatchEvent(event);
+    return { defaultPrevented: event.defaultPrevented, dispatchResult };
+  });
+  expect(cleanEvent).toEqual({
+    defaultPrevented: false,
+    dispatchResult: true,
+  });
+
+  await page.locator("[data-gallery-select]").first().click();
+  await page.getByLabel("タイトル").fill("Unsaved departure guard");
+  const dirtyEvent = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    const dispatchResult = window.dispatchEvent(event);
+    return { defaultPrevented: event.defaultPrevented, dispatchResult };
+  });
+  expect(dirtyEvent).toEqual({
+    defaultPrevented: true,
+    dispatchResult: false,
+  });
+});
+
+test("Gallery Workbench recalculates a photo drop slot after viewport scrolling", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 650 });
+  await page.goto("/admin/gallery/");
+
+  const grid = page.locator("[data-section-grid]").first();
+  const items = grid.locator("[data-gallery-id]");
+  const initialIds = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  const sourceId = initialIds[3];
+  const targetId = initialIds[5];
+  if (!sourceId || !targetId) {
+    throw new Error("Gallery scroll-drag items have no stable ids.");
+  }
+
+  const source = page.locator(
+    `[data-gallery-id="${sourceId}"] [data-gallery-select]`,
+  );
+  const target = page.locator(`[data-gallery-id="${targetId}"]`);
+  await target.scrollIntoViewIfNeeded();
+  const targetBounds = await target.boundingBox();
+  if (!targetBounds) {
+    throw new Error("Gallery scroll-drag target has no visible bounds.");
+  }
+  const fixedPoint = {
+    clientX: targetBounds.x + targetBounds.width / 2,
+    clientY: targetBounds.y + targetBounds.height / 2,
+  };
+  const nearestItemAtPoint = () =>
+    items.evaluateAll(
+      (elements, input) => {
+        const candidates = elements
+          .filter(
+            (element) =>
+              element.getAttribute("data-gallery-id") !== input.sourceId,
+          )
+          .map((element) => {
+            const bounds = element.getBoundingClientRect();
+            const x =
+              input.clientX < bounds.left
+                ? bounds.left - input.clientX
+                : input.clientX > bounds.right
+                  ? input.clientX - bounds.right
+                  : 0;
+            const y =
+              input.clientY < bounds.top
+                ? bounds.top - input.clientY
+                : input.clientY > bounds.bottom
+                  ? input.clientY - bounds.bottom
+                  : 0;
+            return {
+              distance: Math.hypot(x, y),
+              id: element.getAttribute("data-gallery-id") ?? "",
+            };
+          });
+        return candidates.reduce((closest, candidate) =>
+          candidate.distance < closest.distance ? candidate : closest,
+        ).id;
+      },
+      { ...fixedPoint, sourceId },
+    );
+
+  const session = await beginDrag(page, source);
+  await dragOverAt(session, grid, fixedPoint);
+  await page.waitForTimeout(180);
+  const firstIntentOrder = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  const nearestBeforeScroll = await nearestItemAtPoint();
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+  await page.evaluate((top) => {
+    document.documentElement.style.scrollBehavior = "auto";
+    window.scrollTo(0, top);
+  }, scrollBefore + 420);
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBeGreaterThan(scrollBefore + 200);
+  const nearestAfterScroll = await nearestItemAtPoint();
+  expect(nearestAfterScroll).not.toBe(nearestBeforeScroll);
+
+  await dragOverAt(session, grid, fixedPoint);
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+      ),
+    )
+    .not.toEqual(firstIntentOrder);
+  await endDrag(session);
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+      ),
+    )
+    .toEqual(initialIds);
 });

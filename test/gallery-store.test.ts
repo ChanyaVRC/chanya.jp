@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   type GalleryManifest,
   galleryManifestSchema,
@@ -7,6 +7,7 @@ import {
 import {
   GalleryMutationReuseError,
   GalleryStoreConflictError,
+  GalleryStoreUnavailableError,
   loadDraftManifest,
   loadPublishedManifest,
   publishDraftManifest,
@@ -24,6 +25,10 @@ const MUTATION_IDS = {
   reused: "00000000-0000-4000-8000-000000000004",
   conflict: "00000000-0000-4000-8000-000000000005",
   migration: "00000000-0000-4000-8000-000000000006",
+  draftRepair: "00000000-0000-4000-8000-000000000007",
+  publishRepair: "00000000-0000-4000-8000-000000000008",
+  draftAfterRepair: "00000000-0000-4000-8000-000000000009",
+  publishAfterRepair: "00000000-0000-4000-8000-000000000010",
 } as const;
 
 interface GalleryState {
@@ -116,6 +121,7 @@ class MemoryR2Object implements R2ObjectBody {
 
 class MemoryR2Bucket implements R2Bucket {
   private readonly objects = new Map<string, StoredValue>();
+  private readonly pendingPutFailures = new Set<string>();
   private etagSequence = 0;
   private pendingStateConflict: GalleryState | undefined;
 
@@ -137,8 +143,16 @@ class MemoryR2Bucket implements R2Bucket {
     return this.objects.has(key);
   }
 
+  etagFor(key: string): string | undefined {
+    return this.objects.get(key)?.etag;
+  }
+
   conflictNextStatePutWith(state: GalleryState): void {
     this.pendingStateConflict = state;
+  }
+
+  failNextPut(key: string): void {
+    this.pendingPutFailures.add(key);
   }
 
   async head(key: string): Promise<R2Object | null> {
@@ -176,6 +190,9 @@ class MemoryR2Bucket implements R2Bucket {
   ): Promise<R2Object | null> {
     if (typeof value !== "string") {
       throw new TypeError("MemoryR2Bucket only accepts string values.");
+    }
+    if (this.pendingPutFailures.delete(key)) {
+      throw new Error(`Injected R2 put failure: ${key}`);
     }
 
     const onlyIf =
@@ -435,6 +452,248 @@ describe("gallery R2 store", () => {
     expect(state.published.lastMutation?.channel).toBe("published");
     expect(bucket.has(LEGACY_DRAFT_KEY)).toBe(false);
     expect(bucket.has(LEGACY_PUBLISHED_KEY)).toBe(false);
+  });
+
+  it("draft履歴の部分失敗を503相当として扱い、同じmutation再送で修復する", async () => {
+    const bucket = new MemoryR2Bucket();
+    const mutationKey =
+      `mutations/draft/${MUTATION_IDS.draftRepair}.json`;
+    const revisionKey =
+      `revisions/draft/00000002-${MUTATION_IDS.draftRepair}.json`;
+    const update = {
+      baseVersion: 1,
+      mutationId: MUTATION_IDS.draftRepair,
+      ...contentWithTitle("Repair draft history"),
+    };
+    bucket.failNextPut(mutationKey);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await expect(saveDraftManifest(bucket, update)).rejects.toBeInstanceOf(
+        GalleryStoreUnavailableError,
+      );
+      expect(bucket.readJson<GalleryState>(STATE_KEY).draft.version).toBe(2);
+      expect(bucket.has(mutationKey)).toBe(false);
+      expect(bucket.has(revisionKey)).toBe(true);
+
+      const repaired = await saveDraftManifest(bucket, update);
+
+      expect(repaired.version).toBe(2);
+      expect(bucket.has(mutationKey)).toBe(true);
+      expect(bucket.has(revisionKey)).toBe(true);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("publish receiptだけ保存済みの部分失敗も同じmutation再送で修復する", async () => {
+    const bucket = new MemoryR2Bucket();
+    const draft = await saveDraftManifest(bucket, {
+      baseVersion: 1,
+      mutationId: MUTATION_IDS.firstDraft,
+      ...contentWithTitle("Repair published history"),
+    });
+    const mutationKey =
+      `mutations/published/${MUTATION_IDS.publishRepair}.json`;
+    const revisionKey =
+      `revisions/published/00000002-${MUTATION_IDS.publishRepair}.json`;
+    const request = {
+      baseVersion: draft.version,
+      mutationId: MUTATION_IDS.publishRepair,
+    };
+    bucket.failNextPut(revisionKey);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await expect(
+        publishDraftManifest(bucket, request),
+      ).rejects.toBeInstanceOf(GalleryStoreUnavailableError);
+      expect(
+        bucket.readJson<GalleryState>(STATE_KEY).published.lastMutation?.id,
+      ).toBe(MUTATION_IDS.publishRepair);
+      expect(bucket.has(mutationKey)).toBe(true);
+      expect(bucket.has(revisionKey)).toBe(false);
+
+      const repaired = await publishDraftManifest(bucket, request);
+
+      expect(repaired.version).toBe(draft.version);
+      expect(bucket.has(mutationKey)).toBe(true);
+      expect(bucket.has(revisionKey)).toBe(true);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("draftの直前履歴を修復できなければ後続mutationをstateへcommitしない", async () => {
+    const bucket = new MemoryR2Bucket();
+    const previousMutationKey =
+      `mutations/draft/${MUTATION_IDS.draftRepair}.json`;
+    const previousRevisionKey =
+      `revisions/draft/00000002-${MUTATION_IDS.draftRepair}.json`;
+    const nextMutationKey =
+      `mutations/draft/${MUTATION_IDS.draftAfterRepair}.json`;
+    const nextRevisionKey =
+      `revisions/draft/00000003-${MUTATION_IDS.draftAfterRepair}.json`;
+    const firstUpdate = {
+      baseVersion: 1,
+      mutationId: MUTATION_IDS.draftRepair,
+      ...contentWithTitle("Committed without a receipt"),
+    };
+    bucket.failNextPut(previousMutationKey);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await expect(
+        saveDraftManifest(bucket, firstUpdate),
+      ).rejects.toBeInstanceOf(GalleryStoreUnavailableError);
+      const committed = bucket.readJson<GalleryState>(STATE_KEY);
+      const existingRevisionEtag = bucket.etagFor(previousRevisionKey);
+      const statePutCount = bucket.statePutConditions.length;
+      expect(committed.draft.version).toBe(2);
+      expect(committed.draft.lastMutation?.id).toBe(
+        MUTATION_IDS.draftRepair,
+      );
+      expect(bucket.has(previousMutationKey)).toBe(false);
+      expect(existingRevisionEtag).toBeDefined();
+
+      const nextUpdate = {
+        baseVersion: committed.draft.version,
+        mutationId: MUTATION_IDS.draftAfterRepair,
+        ...contentWithTitle("Must wait for history repair"),
+      };
+      bucket.failNextPut(previousMutationKey);
+      await expect(
+        saveDraftManifest(bucket, nextUpdate),
+      ).rejects.toBeInstanceOf(GalleryStoreUnavailableError);
+
+      const blocked = bucket.readJson<GalleryState>(STATE_KEY);
+      expect(blocked.draft).toEqual(committed.draft);
+      expect(bucket.statePutConditions).toHaveLength(statePutCount);
+      expect(bucket.etagFor(previousRevisionKey)).toBe(
+        existingRevisionEtag,
+      );
+      expect(bucket.has(nextMutationKey)).toBe(false);
+      expect(bucket.has(nextRevisionKey)).toBe(false);
+
+      const saved = await saveDraftManifest(bucket, nextUpdate);
+      expect(saved.version).toBe(3);
+      expect(saved.lastMutation?.id).toBe(
+        MUTATION_IDS.draftAfterRepair,
+      );
+      expect(bucket.has(previousMutationKey)).toBe(true);
+      expect(bucket.has(previousRevisionKey)).toBe(true);
+      expect(bucket.etagFor(previousRevisionKey)).toBe(
+        existingRevisionEtag,
+      );
+      expect(bucket.has(nextMutationKey)).toBe(true);
+      expect(bucket.has(nextRevisionKey)).toBe(true);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("publishedの直前履歴を修復できなければ後続publishをstateへcommitしない", async () => {
+    const bucket = new MemoryR2Bucket();
+    const draft = await saveDraftManifest(bucket, {
+      baseVersion: 1,
+      mutationId: MUTATION_IDS.firstDraft,
+      ...contentWithTitle("Publish history gate"),
+    });
+    const previousMutationKey =
+      `mutations/published/${MUTATION_IDS.publishRepair}.json`;
+    const previousRevisionKey =
+      `revisions/published/00000002-${MUTATION_IDS.publishRepair}.json`;
+    const nextMutationKey =
+      `mutations/published/${MUTATION_IDS.publishAfterRepair}.json`;
+    const nextRevisionKey =
+      `revisions/published/00000002-${MUTATION_IDS.publishAfterRepair}.json`;
+    const firstRequest = {
+      baseVersion: draft.version,
+      mutationId: MUTATION_IDS.publishRepair,
+    };
+    bucket.failNextPut(previousRevisionKey);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await expect(
+        publishDraftManifest(bucket, firstRequest),
+      ).rejects.toBeInstanceOf(GalleryStoreUnavailableError);
+      const committed = bucket.readJson<GalleryState>(STATE_KEY);
+      const existingReceiptEtag = bucket.etagFor(previousMutationKey);
+      const statePutCount = bucket.statePutConditions.length;
+      expect(committed.published.lastMutation?.id).toBe(
+        MUTATION_IDS.publishRepair,
+      );
+      expect(existingReceiptEtag).toBeDefined();
+      expect(bucket.has(previousRevisionKey)).toBe(false);
+
+      const nextRequest = {
+        baseVersion: draft.version,
+        mutationId: MUTATION_IDS.publishAfterRepair,
+      };
+      bucket.failNextPut(previousRevisionKey);
+      await expect(
+        publishDraftManifest(bucket, nextRequest),
+      ).rejects.toBeInstanceOf(GalleryStoreUnavailableError);
+
+      const blocked = bucket.readJson<GalleryState>(STATE_KEY);
+      expect(blocked.published).toEqual(committed.published);
+      expect(bucket.statePutConditions).toHaveLength(statePutCount);
+      expect(bucket.etagFor(previousMutationKey)).toBe(
+        existingReceiptEtag,
+      );
+      expect(bucket.has(nextMutationKey)).toBe(false);
+      expect(bucket.has(nextRevisionKey)).toBe(false);
+
+      const published = await publishDraftManifest(bucket, nextRequest);
+      expect(published.lastMutation?.id).toBe(
+        MUTATION_IDS.publishAfterRepair,
+      );
+      expect(bucket.has(previousMutationKey)).toBe(true);
+      expect(bucket.has(previousRevisionKey)).toBe(true);
+      expect(bucket.etagFor(previousMutationKey)).toBe(
+        existingReceiptEtag,
+      );
+      expect(bucket.has(nextMutationKey)).toBe(true);
+      expect(bucket.has(nextRevisionKey)).toBe(true);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("draftに残った別channelのlastMutationから誤った履歴を生成しない", async () => {
+    const bucket = new MemoryR2Bucket();
+    const mismatchedMutationId = MUTATION_IDS.publishRepair;
+    const draft = galleryManifestSchema.parse({
+      ...manifest(2, "Legacy channel mismatch"),
+      lastMutation: {
+        id: mismatchedMutationId,
+        channel: "published",
+        requestHash: "0".repeat(64),
+      },
+    });
+    bucket.seedJson(STATE_KEY, {
+      schemaVersion: 1,
+      draft,
+      published: seedGalleryManifest(),
+    });
+
+    const saved = await saveDraftManifest(bucket, {
+      baseVersion: draft.version,
+      mutationId: MUTATION_IDS.draftAfterRepair,
+      ...contentWithTitle("Valid next draft"),
+    });
+
+    expect(saved.version).toBe(3);
+    expect(saved.lastMutation?.channel).toBe("draft");
+    expect(
+      bucket.has(`mutations/published/${mismatchedMutationId}.json`),
+    ).toBe(false);
+    expect(
+      bucket.has(
+        `revisions/published/00000002-${mismatchedMutationId}.json`,
+      ),
+    ).toBe(false);
   });
 
   it("同じmutation idでsection内容を変えるとrequest hash差分として拒否する", async () => {

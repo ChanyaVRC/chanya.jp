@@ -25,7 +25,9 @@
 	},
 	"vars": {
 		"CF_ACCESS_TEAM_DOMAIN": "https://chanyakushima.cloudflareaccess.com",
-		"CF_ACCESS_AUD": "08f4b21524ee5e79efaaa746e84959d1270a483459856b45c9aeb180e4c0941c"
+		"CF_ACCESS_AUD": "08f4b21524ee5e79efaaa746e84959d1270a483459856b45c9aeb180e4c0941c",
+		"GALLERY_ENVIRONMENT": "production",
+		"GALLERY_CANONICAL_HOST": "chanya.jp"
 	},
 	"secrets": {
 		"required": [
@@ -37,6 +39,40 @@
 		"logs": {
 			"enabled": true,
 			"invocation_logs": true
+		}
+	},
+	"env": {
+		"preview": {
+			"name": "chanya-jp",
+			"workers_dev": false,
+			"preview_urls": true,
+			"r2_buckets": [
+				{
+					"binding": "GALLERY_BUCKET",
+					"bucket_name": "chanya-gallery-preview"
+				}
+			],
+			"images": {
+				"binding": "IMAGES"
+			},
+			"vars": {
+				"CF_ACCESS_TEAM_DOMAIN": "https://chanyakushima.cloudflareaccess.com",
+				"CF_ACCESS_AUD": "08f4b21524ee5e79efaaa746e84959d1270a483459856b45c9aeb180e4c0941c",
+				"GALLERY_ENVIRONMENT": "preview",
+				"GALLERY_CANONICAL_HOST": "chanya.jp"
+			},
+			"secrets": {
+				"required": [
+					"GALLERY_ADMIN_EMAIL"
+				]
+			},
+			"observability": {
+				"enabled": true,
+				"logs": {
+					"enabled": true,
+					"invocation_logs": true
+				}
+			}
 		}
 	}
 }

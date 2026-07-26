@@ -1,5 +1,10 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
+const accessKeySets = new Map<
+  string,
+  ReturnType<typeof createRemoteJWKSet>
+>();
+
 export interface GalleryAdminIdentity {
   readonly email: string;
   readonly localDevelopment: boolean;
@@ -70,6 +75,21 @@ function accessConfiguration(env: CloudflareBindings | undefined): {
   return { teamDomain, audience, adminEmail };
 }
 
+function accessKeySet(
+  teamDomain: string,
+): ReturnType<typeof createRemoteJWKSet> {
+  const existing = accessKeySets.get(teamDomain);
+  if (existing) {
+    return existing;
+  }
+
+  const keySet = createRemoteJWKSet(
+    new URL(`${teamDomain}/cdn-cgi/access/certs`),
+  );
+  accessKeySets.set(teamDomain, keySet);
+  return keySet;
+}
+
 export async function authenticateGalleryAdmin(
   request: Request,
   env: CloudflareBindings | undefined,
@@ -88,9 +108,7 @@ export async function authenticateGalleryAdmin(
   }
 
   try {
-    const keySet = createRemoteJWKSet(
-      new URL(`${config.teamDomain}/cdn-cgi/access/certs`),
-    );
+    const keySet = accessKeySet(config.teamDomain);
     const verification = await jwtVerify(token, keySet, {
       audience: config.audience,
       issuer: config.teamDomain,

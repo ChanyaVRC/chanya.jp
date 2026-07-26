@@ -43,6 +43,15 @@ export class GalleryStoreConflictError extends Error {
   }
 }
 
+export class GalleryStoreUnavailableError extends Error {
+  constructor() {
+    super(
+      "Gallery revision history is temporarily unavailable. Retry the same request.",
+    );
+    this.name = "GalleryStoreUnavailableError";
+  }
+}
+
 function encodeManifest(manifest: GalleryManifest): string {
   return JSON.stringify(manifest);
 }
@@ -201,18 +210,72 @@ async function recordMutation(
 ): Promise<void> {
   const content = encodeManifest(manifest);
   const receipt = JSON.stringify({ requestHash, manifest });
+  const receiptKey = `mutations/${channel}/${mutationId}.json`;
+  const revisionKey =
+    `revisions/${channel}/${String(manifest.version).padStart(8, "0")}-${mutationId}.json`;
   const metadata: R2PutOptions = {
     httpMetadata: { contentType: "application/json; charset=utf-8" },
   };
 
-  await Promise.all([
-    bucket.put(`mutations/${channel}/${mutationId}.json`, receipt, metadata),
-    bucket.put(
-      `revisions/${channel}/${String(manifest.version).padStart(8, "0")}-${mutationId}.json`,
-      content,
-      metadata,
-    ),
+  const [storedReceipt, storedRevision] = await Promise.all([
+    bucket.head(receiptKey),
+    bucket.head(revisionKey),
   ]);
+  const writes: Array<Promise<R2Object | null>> = [];
+  if (!storedReceipt) {
+    writes.push(bucket.put(receiptKey, receipt, metadata));
+  }
+  if (!storedRevision) {
+    writes.push(bucket.put(revisionKey, content, metadata));
+  }
+  await Promise.all(writes);
+}
+
+async function ensureMutationRecorded(
+  bucket: R2Bucket,
+  channel: "draft" | "published",
+  mutationId: string,
+  manifest: GalleryManifest,
+  requestHash: string,
+): Promise<void> {
+  try {
+    await recordMutation(
+      bucket,
+      channel,
+      mutationId,
+      manifest,
+      requestHash,
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "gallery.mutation-record.failed",
+        channel,
+        mutationId,
+        error: error instanceof Error ? error.message : "Unknown error",
+      }),
+    );
+    throw new GalleryStoreUnavailableError();
+  }
+}
+
+async function ensureLastMutationRecorded(
+  bucket: R2Bucket,
+  manifest: GalleryManifest,
+  expectedChannel: "draft" | "published",
+): Promise<void> {
+  const lastMutation = manifest.lastMutation;
+  if (!lastMutation || lastMutation.channel !== expectedChannel) {
+    return;
+  }
+
+  await ensureMutationRecorded(
+    bucket,
+    lastMutation.channel,
+    lastMutation.id,
+    manifest,
+    lastMutation.requestHash,
+  );
 }
 
 export function hasGalleryStore(
@@ -249,6 +312,13 @@ export async function saveDraftManifest(
     hash,
   );
   if (replay) {
+    await ensureMutationRecorded(
+      bucket,
+      "draft",
+      update.mutationId,
+      replay,
+      hash,
+    );
     return replay;
   }
 
@@ -261,6 +331,13 @@ export async function saveDraftManifest(
       hash,
     )
   ) {
+    await ensureMutationRecorded(
+      bucket,
+      "draft",
+      update.mutationId,
+      current.state.draft,
+      hash,
+    );
     return current.state.draft;
   }
   if (current.state.draft.version !== update.baseVersion) {
@@ -280,17 +357,20 @@ export async function saveDraftManifest(
     items: update.items,
   });
 
+  await ensureLastMutationRecorded(bucket, current.state.draft, "draft");
   await conditionallyPutState(
     bucket,
     { ...current.state, draft: next },
     current.etag,
     "draft",
   );
-  try {
-    await recordMutation(bucket, "draft", update.mutationId, next, hash);
-  } catch (error) {
-    console.error("Unable to record gallery draft revision", error);
-  }
+  await ensureMutationRecorded(
+    bucket,
+    "draft",
+    update.mutationId,
+    next,
+    hash,
+  );
   return next;
 }
 
@@ -307,6 +387,13 @@ export async function publishDraftManifest(
     hash,
   );
   if (replay) {
+    await ensureMutationRecorded(
+      bucket,
+      "published",
+      request.mutationId,
+      replay,
+      hash,
+    );
     return replay;
   }
 
@@ -319,6 +406,13 @@ export async function publishDraftManifest(
       hash,
     )
   ) {
+    await ensureMutationRecorded(
+      bucket,
+      "published",
+      request.mutationId,
+      current.state.published,
+      hash,
+    );
     return current.state.published;
   }
   if (current.state.draft.version !== request.baseVersion) {
@@ -334,22 +428,23 @@ export async function publishDraftManifest(
       requestHash: hash,
     },
   });
+  await ensureLastMutationRecorded(
+    bucket,
+    current.state.published,
+    "published",
+  );
   await conditionallyPutState(
     bucket,
     { ...current.state, published: next },
     current.etag,
     "draft",
   );
-  try {
-    await recordMutation(
-      bucket,
-      "published",
-      request.mutationId,
-      next,
-      hash,
-    );
-  } catch (error) {
-    console.error("Unable to record gallery publish revision", error);
-  }
+  await ensureMutationRecorded(
+    bucket,
+    "published",
+    request.mutationId,
+    next,
+    hash,
+  );
   return next;
 }

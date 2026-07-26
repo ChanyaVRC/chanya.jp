@@ -31,6 +31,7 @@ import {
 import {
   GalleryStoreConflictError,
   GalleryMutationReuseError,
+  GalleryStoreUnavailableError,
   hasGalleryStore,
   loadDraftManifest,
   loadPublishedManifest,
@@ -59,6 +60,75 @@ const canonicalPaths = new Set([
   "/other",
   "/products/contents/RuntimeHtml",
 ]);
+
+const galleryReadMethods = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function galleryEnvironment(
+  env: CloudflareBindings | undefined,
+): "preview" | "production" {
+  if (
+    env &&
+    "GALLERY_ENVIRONMENT" in env &&
+    typeof env.GALLERY_ENVIRONMENT === "string" &&
+    env.GALLERY_ENVIRONMENT.trim().toLocaleLowerCase("en") === "preview"
+  ) {
+    return "preview";
+  }
+
+  return "production";
+}
+
+function galleryCanonicalHost(
+  env: CloudflareBindings | undefined,
+): string {
+  const fallback = "chanya.jp";
+  if (
+    !env ||
+    !("GALLERY_CANONICAL_HOST" in env) ||
+    typeof env.GALLERY_CANONICAL_HOST !== "string"
+  ) {
+    return fallback;
+  }
+
+  const candidate = env.GALLERY_CANONICAL_HOST
+    .trim()
+    .toLocaleLowerCase("en");
+  try {
+    const parsed = new URL(`https://${candidate}`);
+    return parsed.hostname === candidate &&
+      parsed.port === "" &&
+      parsed.pathname === "/"
+      ? candidate
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function isGalleryDataHostAllowed(
+  request: Request,
+  env: CloudflareBindings | undefined,
+): boolean {
+  const hostname = new URL(request.url).hostname.toLocaleLowerCase("en");
+  if (
+    import.meta.env.DEV &&
+    (hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]")
+  ) {
+    return true;
+  }
+
+  return galleryEnvironment(env) === "preview"
+    ? hostname.endsWith(".workers.dev")
+    : hostname === galleryCanonicalHost(env);
+}
+
+function galleryBucketForRequest(c: AppContext): R2Bucket | undefined {
+  return isGalleryDataHostAllowed(c.req.raw, c.env)
+    ? c.env?.GALLERY_BUCKET
+    : undefined;
+}
 
 function renderPage(
   c: AppContext,
@@ -149,6 +219,23 @@ app.use("*", async (c, next) => {
   }
 });
 
+app.use("/admin/gallery/api/*", async (c, next) => {
+  if (
+    galleryReadMethods.has(c.req.method) ||
+    isGalleryDataHostAllowed(c.req.raw, c.env)
+  ) {
+    await next();
+    return;
+  }
+
+  c.header("Cache-Control", "private, no-store");
+  c.header("X-Robots-Tag", "noindex, nofollow");
+  return c.json(
+    { error: "Gallery mutations are disabled on this host." },
+    403,
+  );
+});
+
 app.use("/admin/gallery/*", async (c, next) => {
   try {
     c.set("galleryAdmin", await authenticateGalleryAdmin(c.req.raw, c.env));
@@ -172,7 +259,7 @@ app.get("/about/", (c) =>
   renderPage(c, pageMetadata.about, <AboutPage />),
 );
 app.get("/gallery/", async (c) => {
-  const manifest = await loadPublishedManifest(c.env?.GALLERY_BUCKET);
+  const manifest = await loadPublishedManifest(galleryBucketForRequest(c));
   return renderPage(
     c,
     pageMetadata.gallery,
@@ -199,7 +286,7 @@ app.get("/admin/gallery", (c) => {
 });
 
 app.get("/admin/gallery/", async (c) => {
-  const manifest = await loadDraftManifest(c.env?.GALLERY_BUCKET);
+  const manifest = await loadDraftManifest(galleryBucketForRequest(c));
   const csrfToken = createGalleryCsrfToken(c.req.raw);
   c.header(
     "Set-Cookie",
@@ -246,20 +333,20 @@ function auditGalleryMutation(
 
 app.get("/admin/gallery/api/draft", async (c) => {
   return c.json({
-    manifest: await loadDraftManifest(c.env?.GALLERY_BUCKET),
+    manifest: await loadDraftManifest(galleryBucketForRequest(c)),
   });
 });
 
 app.get("/admin/gallery/api/published", async (c) => {
   return c.json({
-    manifest: await loadPublishedManifest(c.env?.GALLERY_BUCKET),
+    manifest: await loadPublishedManifest(galleryBucketForRequest(c)),
   });
 });
 
 app.put("/admin/gallery/api/draft", async (c) => {
   try {
     assertGalleryMutationRequest(c.req.raw);
-    const bucket = c.env?.GALLERY_BUCKET;
+    const bucket = galleryBucketForRequest(c);
     if (!hasGalleryStore(bucket)) {
       return c.json({ error: "Gallery storage is unavailable." }, 503);
     }
@@ -280,6 +367,14 @@ app.put("/admin/gallery/api/draft", async (c) => {
     if (error instanceof GalleryAccessError) {
       auditGalleryMutation(c, "save-draft", "failure");
       return c.json({ error: error.message }, error.status);
+    }
+    if (error instanceof GalleryStoreUnavailableError) {
+      auditGalleryMutation(c, "save-draft", "failure");
+      c.header("Retry-After", "1");
+      return c.json(
+        { error: error.message, retryable: true },
+        503,
+      );
     }
     if (error instanceof GalleryStoreConflictError) {
       auditGalleryMutation(
@@ -334,7 +429,7 @@ async function hasMissingManagedAsset(
 app.post("/admin/gallery/api/publish", async (c) => {
   try {
     assertGalleryMutationRequest(c.req.raw);
-    const bucket = c.env?.GALLERY_BUCKET;
+    const bucket = galleryBucketForRequest(c);
     if (!hasGalleryStore(bucket)) {
       return c.json({ error: "Gallery storage is unavailable." }, 503);
     }
@@ -369,6 +464,14 @@ app.post("/admin/gallery/api/publish", async (c) => {
     if (error instanceof GalleryAccessError) {
       auditGalleryMutation(c, "publish", "failure");
       return c.json({ error: error.message }, error.status);
+    }
+    if (error instanceof GalleryStoreUnavailableError) {
+      auditGalleryMutation(c, "publish", "failure");
+      c.header("Retry-After", "1");
+      return c.json(
+        { error: error.message, retryable: true },
+        503,
+      );
     }
     if (error instanceof GalleryStoreConflictError) {
       auditGalleryMutation(
@@ -430,6 +533,11 @@ function imageContentType(bytes: Uint8Array): "image/jpeg" | "image/png" | "imag
 
 const managedGalleryKeyPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const managedImageTransformVersion = "v1";
+const publicManagedImageCacheControl =
+  "public, max-age=0, must-revalidate";
+const internalManagedImageCacheControl =
+  "public, max-age=31536000, immutable";
 
 async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", buffer);
@@ -448,7 +556,7 @@ app.post(
   async (c) => {
   try {
     assertGalleryMutationRequest(c.req.raw);
-    const bucket = c.env?.GALLERY_BUCKET;
+    const bucket = galleryBucketForRequest(c);
     const images = c.env?.IMAGES;
     if (!hasGalleryStore(bucket) || !images) {
       return c.json({ error: "Gallery image storage is unavailable." }, 503);
@@ -547,6 +655,51 @@ app.post(
   },
 );
 
+function managedImageTransformCache(): Cache | null {
+  return typeof caches === "undefined" ? null : caches.default;
+}
+
+function managedImageTransformCacheKey(
+  requestUrl: string,
+  key: string,
+  transformIdentity: string,
+): Request {
+  const url = new URL(requestUrl);
+  url.pathname = [
+    "",
+    "__gallery-transform-cache",
+    encodeURIComponent(key),
+    encodeURIComponent(transformIdentity),
+  ].join("/");
+  url.search = "";
+  url.hash = "";
+  return new Request(url, { method: "GET" });
+}
+
+function galleryImageResponse(
+  response: Response,
+  visibility: "admin" | "public",
+  format: "image/avif" | "image/webp",
+  transformedEtag: string,
+): Response {
+  const headers = new Headers(response.headers);
+  headers.set(
+    "Cache-Control",
+    visibility === "public" && response.ok
+      ? publicManagedImageCacheControl
+      : "private, no-store",
+  );
+  headers.set("Content-Type", format);
+  headers.set("X-Content-Type-Options", "nosniff");
+  if (visibility === "public" && response.ok) {
+    headers.set("ETag", transformedEtag);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    headers,
+  });
+}
+
 async function serveManagedGalleryImage(
   c: AppContext,
   visibility: "admin" | "public",
@@ -561,7 +714,7 @@ async function serveManagedGalleryImage(
     return c.notFound();
   }
   const match = variant.match(/^(640|1280|1920)\.(avif|webp)$/u);
-  const bucket = c.env?.GALLERY_BUCKET;
+  const bucket = galleryBucketForRequest(c);
   const images = c.env?.IMAGES;
   if (!match || !bucket || !images) {
     return c.notFound();
@@ -579,7 +732,15 @@ async function serveManagedGalleryImage(
     }
   }
 
-  const object = await bucket.get(`assets/${key}`);
+  const objectKey = `assets/${key}`;
+  let object: R2Object | null;
+  let sourceObject: R2ObjectBody | null = null;
+  if (visibility === "public") {
+    object = await bucket.head(objectKey);
+  } else {
+    sourceObject = await bucket.get(objectKey);
+    object = sourceObject;
+  }
   if (!object) {
     c.header("Cache-Control", "no-store");
     return c.notFound();
@@ -587,7 +748,16 @@ async function serveManagedGalleryImage(
 
   const width = Number(match[1]);
   const format = match[2] === "avif" ? "image/avif" : "image/webp";
-  const transformedEtag = `"${object.etag}-${variant}"`;
+  const fit = "scale-down";
+  const quality = match[2] === "avif" ? 82 : 86;
+  const transformIdentity = [
+    object.etag,
+    variant,
+    managedImageTransformVersion,
+    `fit-${fit}`,
+    `q${String(quality)}`,
+  ].join("-");
+  const transformedEtag = `"${transformIdentity}"`;
   if (visibility === "public") {
     const requestEtags =
       c.req.header("If-None-Match")
@@ -597,37 +767,88 @@ async function serveManagedGalleryImage(
       return new Response(null, {
         status: 304,
         headers: {
-          "Cache-Control": "public, max-age=0, must-revalidate",
+          "Cache-Control": publicManagedImageCacheControl,
           ETag: transformedEtag,
         },
       });
     }
   }
 
+  const transformCache =
+    visibility === "public" ? managedImageTransformCache() : null;
+  const cacheKey = transformCache
+    ? managedImageTransformCacheKey(c.req.url, key, transformIdentity)
+    : null;
+  if (transformCache && cacheKey) {
+    try {
+      const cached = await transformCache.match(cacheKey);
+      if (cached) {
+        return galleryImageResponse(
+          cached,
+          visibility,
+          format,
+          transformedEtag,
+        );
+      }
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "gallery.image-cache.read-failed",
+          error: error instanceof Error ? error.message : "Unknown error",
+        }),
+      );
+    }
+  }
+
+  if (!sourceObject) {
+    const current = await bucket.get(objectKey);
+    if (!current) {
+      c.header("Cache-Control", "no-store");
+      return c.notFound();
+    }
+    if (current.etag !== object.etag) {
+      return new Response(null, {
+        status: 503,
+        headers: {
+          "Cache-Control": "no-store",
+          "Retry-After": "1",
+        },
+      });
+    }
+    sourceObject = current;
+  }
+
   const transformation = await images
-    .input(object.body)
-    .transform({ width, fit: "scale-down" })
+    .input(sourceObject.body)
+    .transform({ width, fit })
     .output({
       format,
-      quality: match[2] === "avif" ? 82 : 86,
+      quality,
     });
-  const response = transformation.response();
-  const headers = new Headers(response.headers);
-  headers.set(
-    "Cache-Control",
-    visibility === "public" && response.ok
-      ? "public, max-age=0, must-revalidate"
-      : "private, no-store",
+  const response = galleryImageResponse(
+    transformation.response(),
+    visibility,
+    format,
+    transformedEtag,
   );
-  headers.set("Content-Type", format);
-  headers.set("X-Content-Type-Options", "nosniff");
-  if (visibility === "public" && response.ok) {
-    headers.set("ETag", transformedEtag);
+  if (transformCache && cacheKey && response.ok) {
+    const cachedResponse = response.clone();
+    cachedResponse.headers.set(
+      "Cache-Control",
+      internalManagedImageCacheControl,
+    );
+    c.executionCtx.waitUntil(
+      transformCache.put(cacheKey, cachedResponse).catch((error: unknown) => {
+        console.error(
+          JSON.stringify({
+            event: "gallery.image-cache.write-failed",
+            error: error instanceof Error ? error.message : "Unknown error",
+          }),
+        );
+      }),
+    );
   }
-  return new Response(response.body, {
-    status: response.status,
-    headers,
-  });
+  return response;
 }
 
 app.get("/admin/gallery/media/:key/:variant", (c) =>
