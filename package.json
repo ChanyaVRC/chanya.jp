@@ -12,7 +12,7 @@
     "dev": "npm run assets:build && vite",
     "typecheck": "tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.browser.json --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "npm run build && playwright test",
     "audit:lighthouse": "tsx scripts/lighthouse.ts",
     "build": "npm run assets:build && npm run cf-typegen && npm run typecheck && vite build",
     "build:preview": "npm run assets:build && npm run cf-typegen && npm run typecheck && vite build --mode preview && npm run verify:preview-config",

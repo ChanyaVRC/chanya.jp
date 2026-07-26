@@ -30,7 +30,7 @@ export default defineConfig({
     {
       // Dev mode injects CSS through the module graph, so keep one built
       // preview running to verify production manifest and hashed asset links.
-      command: `npm run preview -- --host 127.0.0.1 --port ${previewPort}`,
+      command: `npx vite preview --host 127.0.0.1 --port ${previewPort}`,
       url: `http://127.0.0.1:${previewPort}`,
       reuseExistingServer: false,
       timeout: 180_000,
