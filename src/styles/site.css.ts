@@ -1228,21 +1228,18 @@ export const gallerySection = style({
   selectors: {
     "&[data-dragging='true']": {
       zIndex: 3,
-      outline: `${vars.size.focusRing} dashed ${vars.color.cobalt}`,
+      outline: `${vars.size.hairline} solid color-mix(in oklab, ${vars.color.cobalt} 38%, ${vars.color.transparent})`,
       outlineOffset: vars.space[2],
-      background: `color-mix(in oklab, ${vars.color.cobaltPale} 42%, ${vars.color.transparent})`,
-      opacity: 0.68,
-      scale: "0.995",
+      background: `color-mix(in oklab, ${vars.color.cobaltPale} 12%, ${vars.color.transparent})`,
     },
     "&[data-section-drop='before']::before": {
       position: "absolute",
       zIndex: 5,
       insetBlockStart: `calc(${vars.space[3]} * -1)`,
       insetInline: 0,
-      height: vars.space[1],
+      height: vars.size.focusRing,
       borderRadius: vars.radius.round,
       background: vars.color.cobalt,
-      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
       pointerEvents: "none",
     },
@@ -1251,10 +1248,9 @@ export const gallerySection = style({
       zIndex: 5,
       insetBlockEnd: `calc(${vars.space[3]} * -1)`,
       insetInline: 0,
-      height: vars.space[1],
+      height: vars.size.focusRing,
       borderRadius: vars.radius.round,
       background: vars.color.cobalt,
-      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
       pointerEvents: "none",
     },
@@ -1339,14 +1335,32 @@ export const galleryGrid = style({
   gridTemplateColumns: "minmax(0, 1fr)",
   columnGap: vars.space[4],
   rowGap: vars.space[8],
-  outline: `${vars.size.focusRing} dashed ${vars.color.transparent}`,
+  outline: `${vars.size.hairline} solid ${vars.color.transparent}`,
   outlineOffset: vars.space[2],
-  transition: `background-color ${vars.motion.quick} ${vars.motion.easeOut}, box-shadow ${vars.motion.quick} ${vars.motion.easeOut}, outline-color ${vars.motion.quick} ${vars.motion.easeOut}`,
   selectors: {
     "&[data-drop-active='true']": {
-      outlineColor: vars.color.cobalt,
-      background: `color-mix(in oklab, ${vars.color.cobaltPale} 62%, ${vars.color.transparent})`,
-      boxShadow: `inset 0 0 0 ${vars.size.focusRing} ${vars.color.cobalt}, 0 0 0 ${vars.space[2]} color-mix(in oklab, ${vars.color.cobaltPale} 72%, ${vars.color.transparent})`,
+      outlineColor: `color-mix(in oklab, ${vars.color.cobalt} 48%, ${vars.color.transparent})`,
+      background: `color-mix(in oklab, ${vars.color.cobaltPale} 18%, ${vars.color.transparent})`,
+      boxShadow: `inset 0 0 0 ${vars.size.hairline} color-mix(in oklab, ${vars.color.cobalt} 34%, ${vars.color.transparent})`,
+    },
+    "&[data-drag-slot-label]::after": {
+      position: "absolute",
+      zIndex: 5,
+      insetBlockStart: "50%",
+      insetInlineStart: "50%",
+      padding: `${vars.space[2]} ${vars.space[3]}`,
+      border: `${vars.size.hairline} solid ${vars.color.cobalt}`,
+      borderRadius: vars.radius.round,
+      background: vars.color.paperRaised,
+      color: vars.color.cobaltDark,
+      boxShadow: vars.shadow.raised,
+      content: "attr(data-drag-slot-label)",
+      fontFamily: vars.font.mono,
+      fontSize: "0.66rem",
+      fontWeight: vars.weight.semibold,
+      pointerEvents: "none",
+      transform: "translate(-50%, -50%)",
+      whiteSpace: "nowrap",
     },
   },
   "@media": {
@@ -1370,16 +1384,16 @@ export const gallerySectionEmpty = style({
 });
 
 globalStyle(
-  `${gallerySection}:has(${galleryGrid}[data-drop-active='true']) ${gallerySectionHeader}, ${gallerySection}[data-section-drop] ${gallerySectionHeader}`,
+  `${gallerySection}:has(${galleryGrid}[data-drop-active='true']) ${gallerySectionHeader}`,
   {
     borderTopColor: vars.color.cobalt,
-    background: `color-mix(in oklab, ${vars.color.cobaltPale} 42%, ${vars.color.transparent})`,
-    boxShadow: `inset 0 ${vars.size.focusRing} 0 ${vars.color.cobalt}`,
+    background: `color-mix(in oklab, ${vars.color.cobaltPale} 18%, ${vars.color.transparent})`,
+    boxShadow: `inset 0 ${vars.size.hairline} 0 ${vars.color.cobalt}`,
   },
 );
 
 globalStyle(
-  `${gallerySection}:has(${galleryGrid}[data-drop-active='true']) ${gallerySectionNumber}, ${gallerySection}[data-section-drop] ${gallerySectionNumber}`,
+  `${gallerySection}:has(${galleryGrid}[data-drop-active='true']) ${gallerySectionNumber}`,
   {
     color: vars.color.cobaltDark,
   },
@@ -1391,6 +1405,19 @@ globalStyle(
     borderColor: vars.color.cobalt,
     background: vars.color.cobaltPale,
     color: vars.color.cobaltDark,
+  },
+);
+
+globalStyle(
+  `${gallerySection}[data-dragging='true'] ${galleryGrid} > *`,
+  {
+    opacity: 0.12,
+    transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}`,
+    "@media": {
+      "(prefers-reduced-motion: reduce)": {
+        transition: "none",
+      },
+    },
   },
 );
 
@@ -1674,25 +1701,88 @@ export const adminPrimaryButton = style({
   },
 });
 
+export const galleryDragGhost = style({
+  position: "fixed",
+  zIndex: 1,
+  insetBlockStart: 0,
+  insetInlineStart: "-200%",
+  display: "grid",
+  width: "16rem",
+  minHeight: vars.space[16],
+  gridTemplateColumns: `${vars.space[16]} minmax(0, 1fr)`,
+  alignItems: "stretch",
+  overflow: "hidden",
+  border: `${vars.size.hairline} solid ${vars.color.graphite}`,
+  borderBlockStart: `${vars.size.focusRing} solid ${vars.color.cobalt}`,
+  borderRadius: vars.radius.control,
+  background: vars.color.paperRaised,
+  color: vars.color.graphite,
+  boxShadow: vars.shadow.raised,
+  opacity: 0.96,
+  pointerEvents: "none",
+  selectors: {
+    "&[data-drag-ghost-kind='section']": {
+      width: "14rem",
+      gridTemplateColumns: "minmax(0, 1fr)",
+    },
+  },
+});
+
+globalStyle(`${galleryDragGhost} > img`, {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+});
+
+globalStyle(`${galleryDragGhost} > div`, {
+  display: "grid",
+  minWidth: 0,
+  alignContent: "center",
+  gap: vars.space[1],
+  padding: vars.space[3],
+});
+
+globalStyle(`${galleryDragGhost} [data-drag-ghost-kind-label]`, {
+  color: vars.color.cobaltDark,
+  fontFamily: vars.font.mono,
+  fontSize: "0.62rem",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+});
+
+globalStyle(`${galleryDragGhost} [data-drag-ghost-title]`, {
+  overflow: "hidden",
+  fontFamily: vars.font.display,
+  fontSize: "0.88rem",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(`${galleryDragGhost} [data-drag-ghost-meta]`, {
+  overflow: "hidden",
+  color: vars.color.graphiteSoft,
+  fontFamily: vars.font.mono,
+  fontSize: "0.62rem",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
 export const galleryEditable = style({
   selectors: {
     "&[data-dragging='true']": {
       zIndex: 3,
-      outline: `${vars.size.focusRing} dashed ${vars.color.cobalt}`,
+      outline: `${vars.size.hairline} solid color-mix(in oklab, ${vars.color.cobalt} 42%, ${vars.color.transparent})`,
       outlineOffset: vars.space[1],
-      background: vars.color.cobaltPale,
-      opacity: 0.72,
-      scale: "0.985",
+      background: `color-mix(in oklab, ${vars.color.cobaltPale} 36%, ${vars.color.paperRaised})`,
     },
     "&[data-item-drop='block-before']::before": {
       position: "absolute",
       zIndex: 4,
       insetBlockStart: `calc(${vars.space[2]} * -1)`,
       insetInline: vars.space[2],
-      height: vars.space[1],
+      height: vars.size.focusRing,
       borderRadius: vars.radius.round,
       background: vars.color.cobalt,
-      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
       pointerEvents: "none",
     },
@@ -1701,10 +1791,9 @@ export const galleryEditable = style({
       zIndex: 4,
       insetBlockEnd: `calc(${vars.space[2]} * -1)`,
       insetInline: vars.space[2],
-      height: vars.space[1],
+      height: vars.size.focusRing,
       borderRadius: vars.radius.round,
       background: vars.color.cobalt,
-      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
       pointerEvents: "none",
     },
@@ -1713,10 +1802,9 @@ export const galleryEditable = style({
       zIndex: 4,
       insetBlock: vars.space[2],
       insetInlineStart: `calc(${vars.space[2]} * -1)`,
-      width: vars.space[1],
+      width: vars.size.focusRing,
       borderRadius: vars.radius.round,
       background: vars.color.cobalt,
-      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
       pointerEvents: "none",
     },
@@ -1725,15 +1813,47 @@ export const galleryEditable = style({
       zIndex: 4,
       insetBlock: vars.space[2],
       insetInlineEnd: `calc(${vars.space[2]} * -1)`,
-      width: vars.space[1],
+      width: vars.size.focusRing,
       borderRadius: vars.radius.round,
       background: vars.color.cobalt,
-      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
       pointerEvents: "none",
     },
+    "&[data-drag-slot-label]::after": {
+      position: "absolute",
+      zIndex: 5,
+      insetBlockStart: "50%",
+      insetInlineStart: "50%",
+      padding: `${vars.space[2]} ${vars.space[3]}`,
+      border: `${vars.size.hairline} solid ${vars.color.cobalt}`,
+      borderRadius: vars.radius.round,
+      background: vars.color.paperRaised,
+      color: vars.color.cobaltDark,
+      boxShadow: vars.shadow.raised,
+      content: "attr(data-drag-slot-label)",
+      fontFamily: vars.font.mono,
+      fontSize: "0.66rem",
+      fontWeight: vars.weight.semibold,
+      pointerEvents: "none",
+      transform: "translate(-50%, -50%)",
+      whiteSpace: "nowrap",
+    },
   },
 });
+
+globalStyle(
+  `${galleryEditable}[data-dragging='true'][data-drag-slot-label] > button, ${galleryEditable}[data-dragging='true'][data-drag-slot-label] > figcaption`,
+  {
+    opacity: 0.12,
+    pointerEvents: "none",
+    transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}`,
+    "@media": {
+      "(prefers-reduced-motion: reduce)": {
+        transition: "none",
+      },
+    },
+  },
+);
 
 export const galleryEditorButton = style({
   position: "relative",
@@ -1981,7 +2101,7 @@ globalStyle("[data-gallery-admin]::after", {
 });
 
 globalStyle(
-  "[data-gallery-admin][data-drag-active]:not([data-drag-active='false'])::after",
+  "[data-gallery-admin][data-drag-active]:not([data-drag-active='false'])[data-drag-label-fallback='true']::after",
   {
     opacity: 1,
     transform: "translate(-50%, 0)",

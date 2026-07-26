@@ -48,6 +48,28 @@ interface DragPoint {
   readonly clientY: number;
 }
 
+type PseudoElement = "::before" | "::after";
+
+async function pseudoMetrics(
+  target: Locator,
+  pseudo: PseudoElement,
+): Promise<{
+  readonly content: string;
+  readonly height: number;
+  readonly opacity: number;
+  readonly width: number;
+}> {
+  return target.evaluate((element, pseudoElement) => {
+    const styles = getComputedStyle(element, pseudoElement);
+    return {
+      content: styles.content,
+      height: Number.parseFloat(styles.height),
+      opacity: Number.parseFloat(styles.opacity),
+      width: Number.parseFloat(styles.width),
+    };
+  }, pseudo);
+}
+
 async function dragEventPoint(
   target: Locator,
   position: DropPosition,
@@ -972,6 +994,41 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
     /Night Sessions/u,
   );
   await expect(addedSection).toHaveAttribute("data-dragging", "true");
+  await expect(initialSection).toHaveAttribute(
+    "data-section-drop",
+    "before",
+  );
+  await expect(page.locator("[data-gallery-drag-ghost]")).toHaveCount(1);
+  await expect(
+    page.locator("[data-gallery-drag-ghost]"),
+  ).toHaveAttribute("data-drag-ghost-kind", "section");
+  const sectionSlot = addedSection.locator("[data-section-grid]");
+  await expect(sectionSlot).toHaveAttribute(
+    "data-drag-slot-label",
+    /Section 01/u,
+  );
+  const sectionSlotMetrics = await pseudoMetrics(sectionSlot, "::after");
+  expect(sectionSlotMetrics.content).toContain("移動先");
+  expect(sectionSlotMetrics.opacity).toBe(1);
+  await expect
+    .poll(() =>
+      sectionSlot
+        .locator(":scope > *")
+        .first()
+        .evaluate((element) =>
+          Number.parseFloat(getComputedStyle(element).opacity),
+        ),
+    )
+    .toBeLessThan(0.2);
+  const sectionHeaderOpacity = await addedSection
+    .locator("header")
+    .evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).opacity),
+    );
+  expect(sectionHeaderOpacity).toBe(1);
+  await expect(page.locator("[data-gallery-drag-status]")).toContainText(
+    "Night Sessions",
+  );
   await expect(sections.first().locator("[data-section-title]")).toHaveText(
     "Night Sessions",
   );
@@ -991,6 +1048,14 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
   await expect(page.locator("[data-gallery-admin]")).not.toHaveAttribute(
     "data-drag-active",
     "true",
+  );
+  await expect(page.locator("[data-gallery-drag-ghost]")).toHaveCount(0);
+  await expect(sectionSlot).not.toHaveAttribute(
+    "data-drag-slot-label",
+    /.+/u,
+  );
+  await expect(page.locator("[data-gallery-drag-status]")).toHaveText(
+    "移動を取り消しました。",
   );
 
   sectionDrag = await beginDrag(
@@ -1045,6 +1110,57 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
   await expect(
     page.locator(`[data-gallery-id="${sourceId}"]`),
   ).toHaveAttribute("data-dragging", "true");
+  const draggedFigure = page.locator(
+    `[data-gallery-id="${sourceId}"]`,
+  );
+  await expect(draggedFigure).toHaveAttribute(
+    "data-drag-slot-label",
+    /移動先/u,
+  );
+  await expect(page.locator("[data-gallery-drag-ghost]")).toHaveCount(1);
+  await expect(
+    page.locator("[data-gallery-drag-ghost]"),
+  ).toHaveAttribute("data-drag-ghost-kind", "item");
+  const itemSlotMetrics = await pseudoMetrics(draggedFigure, "::after");
+  expect(itemSlotMetrics.content).toContain("移動先");
+  expect(itemSlotMetrics.opacity).toBe(1);
+  await expect
+    .poll(() =>
+      draggedFigure
+        .locator(":scope > button")
+        .evaluate((element) =>
+          Number.parseFloat(getComputedStyle(element).opacity),
+        ),
+    )
+    .toBeLessThan(0.2);
+  await expect
+    .poll(() => {
+      return draggedFigure.evaluate((figure) => {
+        const bounds = figure.getBoundingClientRect();
+        const centerX = bounds.left + bounds.width / 2;
+        const centerY = bounds.top + bounds.height / 2;
+        const pointIsVisible =
+          centerX >= 0 &&
+          centerX <= window.innerWidth &&
+          centerY >= 0 &&
+          centerY <= window.innerHeight;
+        const elementAtLabel = pointIsVisible
+          ? document.elementFromPoint(centerX, centerY)
+          : null;
+        const slotIsVisible =
+          elementAtLabel === figure ||
+          (elementAtLabel !== null && figure.contains(elementAtLabel));
+        const admin = document.querySelector("[data-gallery-admin]");
+        const fixedLabelOpacity = admin
+          ? Number.parseFloat(getComputedStyle(admin, "::after").opacity)
+          : Number.NaN;
+        return fixedLabelOpacity === (slotIsVisible ? 0 : 1);
+      });
+    })
+    .toBe(true);
+  await expect(page.locator("[data-gallery-drag-status]")).toContainText(
+    "移動先",
+  );
   await expect(
     addedSection.locator(`[data-gallery-id="${sourceId}"]`),
   ).toHaveCount(1);
@@ -1061,6 +1177,11 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
     addedSection.locator(`[data-gallery-id="${sourceId}"]`),
   ).toHaveCount(0);
   await expect(targetGrid).not.toHaveAttribute("data-drop-active", "true");
+  await expect(page.locator("[data-gallery-drag-ghost]")).toHaveCount(0);
+  await expect(draggedFigure).not.toHaveAttribute(
+    "data-drag-slot-label",
+    /.+/u,
+  );
 
   photoDrag = await beginDrag(page, sourcePhoto);
   await dragOver(photoDrag, targetGrid);
@@ -1119,6 +1240,7 @@ test("Gallery Workbench keeps photo drop boundaries stable", async ({
   const source = page.locator(
     `[data-gallery-id="${sourceId}"] [data-gallery-select]`,
   );
+  const sourceCard = page.locator(`[data-gallery-id="${sourceId}"]`);
   const target = page.locator(`[data-gallery-id="${targetId}"]`);
   await target.scrollIntoViewIfNeeded();
   const targetBounds = await target.boundingBox();
@@ -1132,6 +1254,20 @@ test("Gallery Workbench keeps photo drop boundaries stable", async ({
 
   const session = await beginDrag(page, source);
   await dragOverAt(session, target, fixedPoint);
+  await expect(page.locator("[data-gallery-drag-ghost]")).toHaveCount(1);
+  await expect(sourceCard).toHaveAttribute(
+    "data-drag-slot-label",
+    /移動先/u,
+  );
+  const boundaryMarker = grid.locator("[data-item-drop$='before']");
+  await expect(boundaryMarker).toHaveCount(1);
+  const boundaryAxis = await boundaryMarker.getAttribute("data-item-drop");
+  const boundaryRail = await pseudoMetrics(boundaryMarker, "::before");
+  if (boundaryAxis === "inline-before") {
+    expect(boundaryRail.height).toBeGreaterThan(boundaryRail.width);
+  } else {
+    expect(boundaryRail.width).toBeGreaterThan(boundaryRail.height);
+  }
   const firstPreviewOrder = await items.evaluateAll((elements) =>
     elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
   );
@@ -1165,6 +1301,11 @@ test("Gallery Workbench keeps photo drop boundaries stable", async ({
   ).not.toEqual(firstPreviewOrder);
 
   await endDrag(session);
+  await expect(page.locator("[data-gallery-drag-ghost]")).toHaveCount(0);
+  await expect(sourceCard).not.toHaveAttribute(
+    "data-drag-slot-label",
+    /.+/u,
+  );
   await expect
     .poll(() =>
       items.evaluateAll((elements) =>
@@ -1259,6 +1400,11 @@ test("Gallery Workbench keeps photo drop boundaries stable", async ({
   await expect(
     grid.locator("[data-item-drop='inline-before']"),
   ).toHaveCount(1);
+  const inlineRail = await pseudoMetrics(
+    grid.locator("[data-item-drop='inline-before']"),
+    "::before",
+  );
+  expect(inlineRail.height).toBeGreaterThan(inlineRail.width);
 
   await page.waitForTimeout(32);
   await dragOverAt(gapSession, grid, gap.point);
@@ -1272,6 +1418,10 @@ test("Gallery Workbench keeps photo drop boundaries stable", async ({
     )
     .toEqual(gapPreviewOrder);
   await endDrag(gapSession);
+  await expect(page.locator("[data-gallery-drag-ghost]")).toHaveCount(0);
+  await expect(
+    page.locator(`[data-gallery-id="${gapSourceId}"]`),
+  ).not.toHaveAttribute("data-drag-slot-label", /.+/u);
   await expect
     .poll(() =>
       items.evaluateAll((elements) =>
