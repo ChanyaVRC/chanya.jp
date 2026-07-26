@@ -1431,6 +1431,147 @@ test("Gallery Workbench keeps photo drop boundaries stable", async ({
       ),
     )
     .toEqual(initialIds);
+
+  const leftTargetId = initialIds[1];
+  const leftSourceId = initialIds[2];
+  if (!leftTargetId || !leftSourceId) {
+    throw new Error("Gallery left-edge items have no stable ids.");
+  }
+  const leftTarget = page.locator(
+    `[data-gallery-id="${leftTargetId}"]`,
+  );
+  const leftSource = page.locator(
+    `[data-gallery-id="${leftSourceId}"] [data-gallery-select]`,
+  );
+  await leftTarget.scrollIntoViewIfNeeded();
+  const leftTargetBounds = await leftTarget.boundingBox();
+  const leftSourceBounds = await leftSource.boundingBox();
+  if (!leftTargetBounds || !leftSourceBounds) {
+    throw new Error("Gallery left-edge pair has no visible bounds.");
+  }
+  expect(leftTargetBounds.x).toBeLessThan(leftSourceBounds.x);
+  expect(Math.abs(leftTargetBounds.y - leftSourceBounds.y)).toBeLessThan(2);
+  const leftEdgePoint = {
+    clientX: leftTargetBounds.x + 1,
+    clientY: leftTargetBounds.y + leftTargetBounds.height / 2,
+  };
+  const leftSession = await beginDrag(page, leftSource);
+  await dragOverAt(leftSession, leftTarget, leftEdgePoint);
+  const leftPreviewOrder = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  expect(leftPreviewOrder.indexOf(leftSourceId)).toBe(
+    leftPreviewOrder.indexOf(leftTargetId) - 1,
+  );
+  const leftMarker = page.locator(
+    `[data-gallery-id="${leftSourceId}"]`,
+  );
+  await expect(leftMarker).toHaveAttribute(
+    "data-item-drop",
+    "inline-before",
+  );
+  const leftRail = await pseudoMetrics(leftMarker, "::before");
+  expect(leftRail.height).toBeGreaterThan(leftRail.width);
+
+  const movedLeftSourceBounds = await leftMarker.boundingBox();
+  if (!movedLeftSourceBounds) {
+    throw new Error("Gallery left-edge source moved out of view.");
+  }
+  const heldSourcePoint = {
+    clientX: movedLeftSourceBounds.x + movedLeftSourceBounds.width / 2,
+    clientY: movedLeftSourceBounds.y + movedLeftSourceBounds.height / 2,
+  };
+  expect(
+    Math.hypot(
+      heldSourcePoint.clientX - leftEdgePoint.clientX,
+      heldSourcePoint.clientY - leftEdgePoint.clientY,
+    ),
+  ).toBeGreaterThan(12);
+  await dragOverAt(leftSession, leftMarker, heldSourcePoint);
+  await expect(leftMarker).toHaveAttribute(
+    "data-item-drop",
+    "inline-before",
+  );
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map(
+          (element) => element.getAttribute("data-gallery-id") ?? "",
+        ),
+      ),
+    )
+    .toEqual(leftPreviewOrder);
+
+  await page.waitForTimeout(32);
+  await dragOverAt(leftSession, leftTarget, leftEdgePoint);
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map(
+          (element) => element.getAttribute("data-gallery-id") ?? "",
+        ),
+      ),
+    )
+    .toEqual(leftPreviewOrder);
+
+  await page.waitForTimeout(180);
+  const movedLeftTargetBounds = await leftTarget.boundingBox();
+  if (!movedLeftTargetBounds) {
+    throw new Error("Gallery left-edge target moved out of view.");
+  }
+  const rightEdgePoint = {
+    clientX: movedLeftTargetBounds.x + movedLeftTargetBounds.width - 1,
+    clientY:
+      movedLeftTargetBounds.y + movedLeftTargetBounds.height / 2,
+  };
+  await dragOverAt(leftSession, leftTarget, rightEdgePoint);
+  const rightPreviewOrder = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  expect(rightPreviewOrder.indexOf(leftSourceId)).toBe(
+    rightPreviewOrder.indexOf(leftTargetId) + 1,
+  );
+  await page.waitForTimeout(32);
+  await dragOverAt(leftSession, leftTarget, rightEdgePoint);
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map(
+          (element) => element.getAttribute("data-gallery-id") ?? "",
+        ),
+      ),
+    )
+    .toEqual(rightPreviewOrder);
+
+  await page.waitForTimeout(180);
+  const restoredLeftTargetBounds = await leftTarget.boundingBox();
+  if (!restoredLeftTargetBounds) {
+    throw new Error("Gallery left-edge target moved out of view.");
+  }
+  await dragOverAt(leftSession, leftTarget, {
+    clientX: restoredLeftTargetBounds.x + 1,
+    clientY:
+      restoredLeftTargetBounds.y + restoredLeftTargetBounds.height / 2,
+  });
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map(
+          (element) => element.getAttribute("data-gallery-id") ?? "",
+        ),
+      ),
+    )
+    .toEqual(leftPreviewOrder);
+  await endDrag(leftSession);
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map(
+          (element) => element.getAttribute("data-gallery-id") ?? "",
+        ),
+      ),
+    )
+    .toEqual(initialIds);
 });
 
 test("Gallery Workbench toolbar remains reachable at 320px", async ({

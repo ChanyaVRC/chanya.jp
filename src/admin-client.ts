@@ -2156,19 +2156,7 @@ function paintDragFeedback(): void {
     );
     const marker = items[sourceIndex];
     if (marker) {
-      const previous = sourceIndex > 0 ? items[sourceIndex - 1] : undefined;
-      const sharesRow =
-        previous !== undefined &&
-        Math.min(
-          previous.offsetTop + previous.offsetHeight,
-          marker.offsetTop + marker.offsetHeight,
-        ) > Math.max(previous.offsetTop, marker.offsetTop);
-      const markerAxis: ItemDropAxis =
-        sharesRow &&
-        marker.offsetWidth < grid.clientWidth * 0.8
-          ? "inline"
-          : "block";
-      marker.dataset.itemDrop = `${markerAxis}-before`;
+      marker.dataset.itemDrop = `${dragIntent.markerAxis}-before`;
     }
     return;
   }
@@ -2207,6 +2195,15 @@ function pointDistanceToRect(
         ? point.y - bounds.bottom
         : 0;
   return Math.hypot(x, y);
+}
+
+function rectContainsPoint(bounds: DOMRect, point: DragPoint): boolean {
+  return (
+    point.x >= bounds.left &&
+    point.x <= bounds.right &&
+    point.y >= bounds.top &&
+    point.y <= bounds.bottom
+  );
 }
 
 function eventPoint(event: DragEvent): DragPoint {
@@ -2276,6 +2273,21 @@ function itemPlacementAtPoint(
   if (!targetSectionId) {
     return null;
   }
+  const point = eventPoint(event);
+  const previewSource = grid.querySelector<HTMLElement>(
+    `[data-gallery-id="${CSS.escape(sourceId)}"]`,
+  );
+  if (
+    dragIntent?.kind === "item" &&
+    dragIntent.targetSectionId === targetSectionId &&
+    previewSource &&
+    rectContainsPoint(previewSource.getBoundingClientRect(), point)
+  ) {
+    return {
+      beforeId: dragIntent.beforeId,
+      markerAxis: dragIntent.markerAxis,
+    };
+  }
   const entries = manifest.items.filter(
     (item) =>
       item.sectionId === targetSectionId && item.id !== sourceId,
@@ -2296,7 +2308,6 @@ function itemPlacementAtPoint(
     return null;
   }
 
-  const point = eventPoint(event);
   const closest = candidates.reduce((current, candidate) =>
     pointDistanceToRect(point, candidate.bounds) <
     pointDistanceToRect(point, current.bounds)
