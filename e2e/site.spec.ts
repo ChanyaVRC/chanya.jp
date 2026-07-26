@@ -1,5 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type JSHandle,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 
 const publicPages = [
   { path: "/", heading: "ねこ。多分技術者。" },
@@ -30,73 +36,76 @@ async function assertNoAxeViolations(page: Page) {
   expect(results.violations, details).toEqual([]);
 }
 
-async function dispatchDragAndDrop(
-  page: Page,
-  source: Locator,
+type DropPosition = "before" | "after";
+
+interface DragSession {
+  readonly source: Locator;
+  readonly dataTransfer: JSHandle<DataTransfer>;
+}
+
+async function dragEventPoint(
   target: Locator,
-  position: "before" | "after" = "before",
-): Promise<void> {
-  const sourceHandle = await source.elementHandle();
-  const targetHandle = await target.elementHandle();
-  if (!sourceHandle || !targetHandle) {
-    throw new Error("Drag source or target is missing.");
+  position: DropPosition,
+): Promise<{ readonly clientX: number; readonly clientY: number }> {
+  const bounds = await target.boundingBox();
+  if (!bounds) {
+    throw new Error("Drag target has no visible bounds.");
   }
 
-  await page.evaluate(
-    ({ sourceElement, targetElement, dropPosition }) => {
-      const transfer = new DataTransfer();
-      const sourceBounds = sourceElement.getBoundingClientRect();
-      const targetBounds = targetElement.getBoundingClientRect();
-      const sourceX = sourceBounds.left + sourceBounds.width / 2;
-      const sourceY = sourceBounds.top + sourceBounds.height / 2;
-      const targetX = targetBounds.left + targetBounds.width / 2;
-      const targetY =
-        dropPosition === "before"
-          ? targetBounds.top + 1
-          : targetBounds.bottom - 1;
+  return {
+    clientX: bounds.x + bounds.width / 2,
+    clientY:
+      position === "before"
+        ? bounds.y + 1
+        : bounds.y + bounds.height - 1,
+  };
+}
 
-      sourceElement.dispatchEvent(
-        new DragEvent("dragstart", {
-          bubbles: true,
-          cancelable: true,
-          clientX: sourceX,
-          clientY: sourceY,
-          dataTransfer: transfer,
-        }),
-      );
-      targetElement.dispatchEvent(
-        new DragEvent("dragover", {
-          bubbles: true,
-          cancelable: true,
-          clientX: targetX,
-          clientY: targetY,
-          dataTransfer: transfer,
-        }),
-      );
-      targetElement.dispatchEvent(
-        new DragEvent("drop", {
-          bubbles: true,
-          cancelable: true,
-          clientX: targetX,
-          clientY: targetY,
-          dataTransfer: transfer,
-        }),
-      );
-      sourceElement.dispatchEvent(
-        new DragEvent("dragend", {
-          bubbles: true,
-          clientX: targetX,
-          clientY: targetY,
-          dataTransfer: transfer,
-        }),
-      );
-    },
-    {
-      sourceElement: sourceHandle,
-      targetElement: targetHandle,
-      dropPosition: position,
-    },
-  );
+async function beginDrag(
+  page: Page,
+  source: Locator,
+): Promise<DragSession> {
+  const bounds = await source.boundingBox();
+  if (!bounds) {
+    throw new Error("Drag source has no visible bounds.");
+  }
+
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await source.dispatchEvent("dragstart", {
+    dataTransfer,
+    clientX: bounds.x + bounds.width / 2,
+    clientY: bounds.y + bounds.height / 2,
+  });
+  return { source, dataTransfer };
+}
+
+async function dragOver(
+  session: DragSession,
+  target: Locator,
+  position: DropPosition = "before",
+): Promise<void> {
+  await target.dispatchEvent("dragover", {
+    dataTransfer: session.dataTransfer,
+    ...(await dragEventPoint(target, position)),
+  });
+}
+
+async function dropAt(
+  session: DragSession,
+  target: Locator,
+  position: DropPosition = "before",
+): Promise<void> {
+  await target.dispatchEvent("drop", {
+    dataTransfer: session.dataTransfer,
+    ...(await dragEventPoint(target, position)),
+  });
+}
+
+async function endDrag(session: DragSession): Promise<void> {
+  await session.source.dispatchEvent("dragend", {
+    dataTransfer: session.dataTransfer,
+  });
+  await session.dataTransfer.dispose();
 }
 
 test("production preview links and applies shared site styles", async ({
@@ -828,6 +837,7 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
   page,
 }) => {
   let revision = 1;
+  let draftWrites = 0;
   let savedSectionTitles: string[] = [];
   let savedItems: Array<{
     readonly id: string;
@@ -855,6 +865,7 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
 
     const sections = request.sections;
     const items = request.items;
+    draftWrites += 1;
     savedSectionTitles = sections.flatMap((section) =>
       typeof section === "object" &&
       section !== null &&
@@ -914,75 +925,142 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
   await expect.poll(() => savedSectionTitles).toContain("Night Sessions");
 
   await page.locator("[data-inspector-close]").click();
-  const addedSection = page
-    .locator("[data-gallery-section]")
-    .filter({ hasText: "Night Sessions" });
-  await dispatchDragAndDrop(
+  const initialSectionId = await sections
+    .first()
+    .getAttribute("data-section-id");
+  const addedSectionId = await sections
+    .last()
+    .getAttribute("data-section-id");
+  if (!initialSectionId || !addedSectionId) {
+    throw new Error("Gallery sections have no stable ids.");
+  }
+  const initialSection = page.locator(
+    `[data-gallery-section][data-section-id="${initialSectionId}"]`,
+  );
+  const addedSection = page.locator(
+    `[data-gallery-section][data-section-id="${addedSectionId}"]`,
+  );
+  const sectionWritesBeforePreview = draftWrites;
+  let sectionDrag = await beginDrag(
     page,
     addedSection.locator("[data-section-drag]"),
-    sections.first(),
   );
+  await dragOver(sectionDrag, initialSection);
+  await expect(page.locator("[data-gallery-admin]")).toHaveAttribute(
+    "data-drag-label",
+    /Night Sessions/u,
+  );
+  await expect(addedSection).toHaveAttribute("data-dragging", "true");
   await expect(sections.first().locator("[data-section-title]")).toHaveText(
     "Night Sessions",
+  );
+  await page.waitForTimeout(800);
+  expect(draftWrites).toBe(sectionWritesBeforePreview);
+  await endDrag(sectionDrag);
+  await expect(sections.first()).toHaveAttribute(
+    "data-section-id",
+    initialSectionId,
+  );
+  await expect(page.locator("[data-gallery-admin]")).not.toHaveAttribute(
+    "data-drag-active",
+    "true",
+  );
+
+  sectionDrag = await beginDrag(
+    page,
+    addedSection.locator("[data-section-drag]"),
+  );
+  await dragOver(sectionDrag, initialSection);
+  await expect(sections.first()).toHaveAttribute(
+    "data-section-id",
+    addedSectionId,
+  );
+  await dropAt(sectionDrag, initialSection);
+  await endDrag(sectionDrag);
+  await expect(sections.first()).toHaveAttribute(
+    "data-section-id",
+    addedSectionId,
   );
   await page.locator("[data-gallery-save]").click();
   await expect
     .poll(() => savedSectionTitles[0])
     .toBe("Night Sessions");
 
-  await sections.first().locator("[data-section-drag]").focus();
+  await addedSection.locator("[data-section-drag]").focus();
   await page.keyboard.press("Alt+ArrowDown");
-  await expect(sections.last().locator("[data-section-title]")).toHaveText(
-    "Night Sessions",
+  await expect(sections.last()).toHaveAttribute(
+    "data-section-id",
+    addedSectionId,
+  );
+  await page.locator("[data-gallery-save]").click();
+  await expect(page.locator("[data-gallery-status]")).toContainText(
+    "下書きは同期済み",
   );
 
-  const sourceFigure = sections
-    .first()
+  const sourceFigure = initialSection
     .locator("[data-gallery-id]")
     .first();
   const sourceId = await sourceFigure.getAttribute("data-gallery-id");
   if (!sourceId) {
     throw new Error("The first gallery item has no stable id.");
   }
-  await dispatchDragAndDrop(
-    page,
-    sourceFigure.locator("[data-gallery-select]"),
-    sections.last().locator("[data-section-empty]"),
+  const sourcePhoto = page.locator(
+    `[data-gallery-id="${sourceId}"] [data-gallery-select]`,
   );
+  const targetGrid = addedSection.locator("[data-section-grid]");
+  const photoWritesBeforePreview = draftWrites;
+  let photoDrag = await beginDrag(
+    page,
+    sourcePhoto,
+  );
+  await dragOver(photoDrag, targetGrid);
+  await expect(targetGrid).toHaveAttribute("data-drop-active", "true");
   await expect(
-    sections.last().locator(`[data-gallery-id="${sourceId}"]`),
+    page.locator(`[data-gallery-id="${sourceId}"]`),
+  ).toHaveAttribute("data-dragging", "true");
+  await expect(
+    addedSection.locator(`[data-gallery-id="${sourceId}"]`),
   ).toHaveCount(1);
-  await expect(sections.last().locator("[data-section-count]")).toHaveText(
+  await expect(addedSection.locator("[data-section-count]")).toHaveText(
     "01 works",
   );
-  const targetSectionId = await sections
-    .last()
-    .getAttribute("data-section-id");
-  if (!targetSectionId) {
-    throw new Error("The photo drop target has no stable section id.");
-  }
+  await page.waitForTimeout(800);
+  expect(draftWrites).toBe(photoWritesBeforePreview);
+  await endDrag(photoDrag);
+  await expect(
+    initialSection.locator(`[data-gallery-id="${sourceId}"]`),
+  ).toHaveCount(1);
+  await expect(
+    addedSection.locator(`[data-gallery-id="${sourceId}"]`),
+  ).toHaveCount(0);
+  await expect(targetGrid).not.toHaveAttribute("data-drop-active", "true");
+
+  photoDrag = await beginDrag(page, sourcePhoto);
+  await dragOver(photoDrag, targetGrid);
+  await expect(
+    addedSection.locator(`[data-gallery-id="${sourceId}"]`),
+  ).toHaveCount(1);
+  await dropAt(photoDrag, targetGrid);
+  await endDrag(photoDrag);
+  await expect(
+    addedSection.locator(`[data-gallery-id="${sourceId}"]`),
+  ).toHaveCount(1);
   await page.locator("[data-gallery-save]").click();
   await expect
     .poll(
       () => savedItems.find((item) => item.id === sourceId)?.sectionId,
     )
-    .toBe(targetSectionId);
+    .toBe(addedSectionId);
 
-  const movedPhoto = sections
-    .last()
-    .locator(`[data-gallery-id="${sourceId}"] [data-gallery-select]`);
+  const movedPhoto = addedSection.locator(
+    `[data-gallery-id="${sourceId}"] [data-gallery-select]`,
+  );
   await movedPhoto.focus();
   await page.keyboard.press("Alt+ArrowLeft");
   await expect(
-    sections.first().locator(`[data-gallery-id="${sourceId}"]`),
+    initialSection.locator(`[data-gallery-id="${sourceId}"]`),
   ).toHaveCount(1);
 
-  const firstSectionId = await sections
-    .first()
-    .getAttribute("data-section-id");
-  if (!firstSectionId) {
-    throw new Error("The first gallery section has no stable id.");
-  }
   await page.locator("[data-gallery-save]").click();
   await expect(page.locator("[data-gallery-status]")).toContainText(
     "下書きは同期済み",
@@ -991,7 +1069,7 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
     .poll(
       () => savedItems.find((item) => item.id === sourceId)?.sectionId,
     )
-    .toBe(firstSectionId);
+    .toBe(initialSectionId);
   await assertNoAxeViolations(page);
 });
 

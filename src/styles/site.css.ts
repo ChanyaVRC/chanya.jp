@@ -1224,27 +1224,39 @@ export const gallerySection = style({
   display: "grid",
   minWidth: 0,
   gap: vars.space[5],
-  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, scale ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
   selectors: {
     "&[data-dragging='true']": {
       zIndex: 3,
-      opacity: 0.55,
+      outline: `${vars.size.focusRing} dashed ${vars.color.cobalt}`,
+      outlineOffset: vars.space[2],
+      background: `color-mix(in oklab, ${vars.color.cobaltPale} 42%, ${vars.color.transparent})`,
+      opacity: 0.68,
+      scale: "0.995",
     },
     "&[data-section-drop='before']::before": {
       position: "absolute",
+      zIndex: 5,
       insetBlockStart: `calc(${vars.space[3]} * -1)`,
       insetInline: 0,
       height: vars.space[1],
+      borderRadius: vars.radius.round,
       background: vars.color.cobalt,
+      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
+      pointerEvents: "none",
     },
     "&[data-section-drop='after']::after": {
       position: "absolute",
+      zIndex: 5,
       insetBlockEnd: `calc(${vars.space[3]} * -1)`,
       insetInline: 0,
       height: vars.space[1],
+      borderRadius: vars.radius.round,
       background: vars.color.cobalt,
+      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
+      pointerEvents: "none",
     },
   },
 });
@@ -1321,16 +1333,20 @@ export const gallerySectionEditButton = style({
 });
 
 export const galleryGrid = style({
+  position: "relative",
   display: "grid",
   width: "100%",
   gridTemplateColumns: "minmax(0, 1fr)",
   columnGap: vars.space[4],
   rowGap: vars.space[8],
-  transition: `background ${vars.motion.quick} ${vars.motion.easeOut}, box-shadow ${vars.motion.quick} ${vars.motion.easeOut}`,
+  outline: `${vars.size.focusRing} dashed ${vars.color.transparent}`,
+  outlineOffset: vars.space[2],
+  transition: `background-color ${vars.motion.quick} ${vars.motion.easeOut}, box-shadow ${vars.motion.quick} ${vars.motion.easeOut}, outline-color ${vars.motion.quick} ${vars.motion.easeOut}`,
   selectors: {
     "&[data-drop-active='true']": {
-      background: `color-mix(in oklab, ${vars.color.cobaltPale} 32%, ${vars.color.transparent})`,
-      boxShadow: `inset 0 0 0 ${vars.size.focusRing} ${vars.color.cobalt}`,
+      outlineColor: vars.color.cobalt,
+      background: `color-mix(in oklab, ${vars.color.cobaltPale} 62%, ${vars.color.transparent})`,
+      boxShadow: `inset 0 0 0 ${vars.size.focusRing} ${vars.color.cobalt}, 0 0 0 ${vars.space[2]} color-mix(in oklab, ${vars.color.cobaltPale} 72%, ${vars.color.transparent})`,
     },
   },
   "@media": {
@@ -1353,10 +1369,35 @@ export const gallerySectionEmpty = style({
   fontSize: "0.76rem",
 });
 
+globalStyle(
+  `${gallerySection}:has(${galleryGrid}[data-drop-active='true']) ${gallerySectionHeader}, ${gallerySection}[data-section-drop] ${gallerySectionHeader}`,
+  {
+    borderTopColor: vars.color.cobalt,
+    background: `color-mix(in oklab, ${vars.color.cobaltPale} 42%, ${vars.color.transparent})`,
+    boxShadow: `inset 0 ${vars.size.focusRing} 0 ${vars.color.cobalt}`,
+  },
+);
+
+globalStyle(
+  `${gallerySection}:has(${galleryGrid}[data-drop-active='true']) ${gallerySectionNumber}, ${gallerySection}[data-section-drop] ${gallerySectionNumber}`,
+  {
+    color: vars.color.cobaltDark,
+  },
+);
+
+globalStyle(
+  `${galleryGrid}[data-drop-active='true'] ${gallerySectionEmpty}`,
+  {
+    borderColor: vars.color.cobalt,
+    background: vars.color.cobaltPale,
+    color: vars.color.cobaltDark,
+  },
+);
+
 export const galleryItem = style({
   position: "relative",
   minWidth: 0,
-  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, scale ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.deliberate} ${vars.motion.easeOut}`,
 });
 
 export const galleryItemWide = style({
@@ -1637,38 +1678,49 @@ export const galleryEditable = style({
   selectors: {
     "&[data-dragging='true']": {
       zIndex: 3,
-      opacity: 0.55,
+      outline: `${vars.size.focusRing} dashed ${vars.color.cobalt}`,
+      outlineOffset: vars.space[1],
+      background: vars.color.cobaltPale,
+      opacity: 0.72,
+      scale: "0.985",
     },
     "&[data-item-drop='before']::before": {
       position: "absolute",
       zIndex: 4,
       insetBlockStart: `calc(${vars.space[2]} * -1)`,
-      insetInline: 0,
+      insetInline: vars.space[2],
       height: vars.space[1],
+      borderRadius: vars.radius.round,
       background: vars.color.cobalt,
+      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
+      pointerEvents: "none",
     },
     "&[data-item-drop='after']::after": {
       position: "absolute",
       zIndex: 4,
       insetBlockEnd: `calc(${vars.space[2]} * -1)`,
-      insetInline: 0,
+      insetInline: vars.space[2],
       height: vars.space[1],
+      borderRadius: vars.radius.round,
       background: vars.color.cobalt,
+      boxShadow: `0 0 0 ${vars.space[1]} color-mix(in oklab, ${vars.color.cobaltPale} 82%, ${vars.color.transparent})`,
       content: "",
+      pointerEvents: "none",
     },
   },
 });
 
 export const galleryEditorButton = style({
   position: "relative",
-  cursor: "pointer",
+  cursor: "grab",
   selectors: {
     "&[aria-pressed='true']": {
       borderColor: vars.color.cobalt,
       boxShadow: `0 0 0 ${vars.size.focusRing} ${vars.color.cobalt}`,
     },
     "&:active": {
+      cursor: "grabbing",
       transform: "none",
     },
   },
@@ -1868,6 +1920,69 @@ globalStyle(
   `[data-gallery-admin][data-preview='true'] ${gallerySectionEditButton}, [data-gallery-admin][data-preview='true'] ${gallerySectionEmpty}`,
   {
     display: "none",
+  },
+);
+
+globalStyle("[data-gallery-admin]::after", {
+  position: "fixed",
+  zIndex: 80,
+  insetInlineStart: "50%",
+  insetBlockEnd: `max(${vars.space[4]}, env(safe-area-inset-bottom))`,
+  display: "block",
+  maxWidth: `calc(100vw - ${vars.space[8]})`,
+  padding: `${vars.space[2]} ${vars.space[4]}`,
+  overflow: "hidden",
+  border: `${vars.size.hairline} solid ${vars.color.cobaltDark}`,
+  borderRadius: vars.radius.round,
+  background: vars.color.cobalt,
+  boxShadow: vars.shadow.raised,
+  color: vars.color.accentInk,
+  content: "attr(data-drag-label)",
+  fontFamily: vars.font.mono,
+  fontSize: "0.72rem",
+  fontWeight: vars.weight.semibold,
+  lineHeight: 1.3,
+  opacity: 0,
+  pointerEvents: "none",
+  textOverflow: "ellipsis",
+  transform: `translate(-50%, ${vars.space[2]})`,
+  transition: `opacity ${vars.motion.quick} ${vars.motion.easeOut}, transform ${vars.motion.quick} ${vars.motion.easeOut}`,
+  whiteSpace: "nowrap",
+  "@media": {
+    "(prefers-reduced-motion: reduce)": {
+      transform: "translate(-50%, 0)",
+      transition: "none",
+    },
+  },
+});
+
+globalStyle(
+  "[data-gallery-admin][data-drag-active]:not([data-drag-active='false'])::after",
+  {
+    opacity: 1,
+    transform: "translate(-50%, 0)",
+  },
+);
+
+globalStyle(
+  `[data-gallery-admin]:has(${adminInspector}[data-open='true'])::after`,
+  {
+    "@media": {
+      "screen and (max-width: 63.99rem)": {
+        insetBlockEnd: `calc(52dvh + ${vars.space[4]})`,
+      },
+    },
+  },
+);
+
+globalStyle(
+  `${gallerySection}[data-dragging='true'], ${galleryEditable}[data-dragging='true']`,
+  {
+    "@media": {
+      "(prefers-reduced-motion: reduce)": {
+        scale: "none",
+      },
+    },
   },
 );
 

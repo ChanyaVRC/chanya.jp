@@ -97,6 +97,8 @@ type EditorSelection =
   | { readonly kind: "item"; readonly id: string }
   | { readonly kind: "section"; readonly id: string };
 
+type DropPosition = "before" | "after";
+
 type DragState =
   | {
       readonly kind: "item";
@@ -109,6 +111,19 @@ type DragState =
       readonly snapshot: GalleryContent;
     };
 
+type DragIntent =
+  | {
+      readonly kind: "item";
+      readonly targetSectionId: string;
+      readonly beforeId: string | null;
+      readonly label: string;
+    }
+  | {
+      readonly kind: "section";
+      readonly beforeId: string | null;
+      readonly label: string;
+    };
+
 const undoStack: GalleryContent[] = [];
 let manifest = structuredClone(bootstrap.manifest);
 let confirmedManifest = structuredClone(bootstrap.manifest);
@@ -118,9 +133,11 @@ let importInProgress = false;
 let saveTimer: number | null = null;
 let saveQueue: Promise<boolean> | null = null;
 let saveAgain = false;
+let saveInProgress = false;
 let toastTimer: number | null = null;
 let inspectorEditStart: GalleryContent | null = null;
 let dragState: DragState | null = null;
+let dragIntent: DragIntent | null = null;
 
 function contentFingerprint(content: GalleryContent): string {
   return JSON.stringify({
@@ -627,7 +644,11 @@ function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
     return;
   }
 
+  const duration = dragState ? 160 : 280;
   const records = layoutElements().map((element) => {
+    element.getAnimations().forEach((animation) => {
+      animation.cancel();
+    });
     const key = animationKey(element);
     return {
       element,
@@ -666,7 +687,7 @@ function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
           { opacity: 0, transform: "translateY(0.5rem)" },
           { opacity: 1, transform: "none" },
         ],
-        { duration: 280, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+        { duration, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
       );
       return;
     }
@@ -679,7 +700,7 @@ function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
           { transform: `translate(${String(x)}px, ${String(y)}px)` },
           { transform: "none" },
         ],
-        { duration: 280, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+        { duration, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
       );
     }
   });
@@ -774,11 +795,11 @@ function render(animate = false): void {
 }
 
 function scheduleSave(): void {
-  if (importInProgress) {
+  setStatus("未保存の変更", "saving");
+  if (importInProgress || dragState) {
     saveAgain = true;
     return;
   }
-  setStatus("未保存の変更", "saving");
   if (saveTimer !== null) {
     window.clearTimeout(saveTimer);
   }
@@ -857,7 +878,7 @@ async function fetchPublishedManifest(): Promise<GalleryManifest | null> {
 }
 
 async function performSave(): Promise<boolean> {
-  if (importInProgress) {
+  if (importInProgress || dragState) {
     saveAgain = true;
     return true;
   }
@@ -872,6 +893,7 @@ async function performSave(): Promise<boolean> {
 
   const sentContent = cloneContent();
   const sentFingerprint = contentFingerprint(sentContent);
+  saveInProgress = true;
   setStatus("下書きを保存中", "saving");
   saveButton.disabled = true;
   publishButton.disabled = true;
@@ -976,6 +998,7 @@ async function performSave(): Promise<boolean> {
     );
     return false;
   } finally {
+    saveInProgress = false;
     saveButton.disabled = false;
     publishButton.disabled = false;
   }
@@ -992,7 +1015,7 @@ function saveDraft(): Promise<boolean> {
     do {
       saveAgain = false;
       saved = await performSave();
-    } while (saved && saveAgain && !importInProgress);
+    } while (saved && saveAgain && !importInProgress && !dragState);
     if (!saved) {
       saveAgain = false;
     }
@@ -1577,105 +1600,367 @@ function clearDropIndicators(): void {
       delete element.dataset.itemDrop;
       delete element.dataset.sectionDrop;
     });
+  delete root.dataset.dragActive;
+  delete root.dataset.dragKind;
+  delete root.dataset.dragLabel;
 }
 
-function pointerDropPosition(
+function paintDragFeedback(): void {
+  clearDropIndicators();
+  if (!dragState) {
+    return;
+  }
+
+  root.dataset.dragActive = "true";
+  root.dataset.dragKind = dragState.kind;
+  root.dataset.dragLabel =
+    dragIntent?.kind === dragState.kind
+      ? dragIntent.label
+      : dragState.kind === "item"
+        ? "写真を移動中 · 移動先を選択"
+        : "セクションを移動中 · 移動先を選択";
+
+  const source =
+    dragState.kind === "item"
+      ? canvas.querySelector<HTMLElement>(
+          `[data-gallery-id="${CSS.escape(dragState.id)}"]`,
+        )
+      : canvas.querySelector<HTMLElement>(
+          `[data-gallery-section][data-section-id="${CSS.escape(dragState.id)}"]`,
+        );
+  if (source) {
+    source.dataset.dragging = "true";
+  }
+
+  if (!dragIntent || dragIntent.kind !== dragState.kind) {
+    return;
+  }
+
+  if (dragIntent.kind === "item") {
+    const grid = canvas.querySelector<HTMLElement>(
+      `[data-section-grid][data-section-id="${CSS.escape(dragIntent.targetSectionId)}"]`,
+    );
+    if (!grid) {
+      return;
+    }
+    grid.dataset.dropActive = "true";
+    const marker =
+      dragIntent.beforeId === null
+        ? Array.from(
+            grid.querySelectorAll<HTMLElement>("[data-gallery-id]"),
+          ).at(-1)
+        : grid.querySelector<HTMLElement>(
+            `[data-gallery-id="${CSS.escape(dragIntent.beforeId)}"]`,
+          );
+    if (marker) {
+      marker.dataset.itemDrop =
+        dragIntent.beforeId === null ? "after" : "before";
+    }
+    return;
+  }
+
+  const marker =
+    dragIntent.beforeId === null
+      ? Array.from(
+          canvas.querySelectorAll<HTMLElement>("[data-gallery-section]"),
+        ).at(-1)
+      : canvas.querySelector<HTMLElement>(
+          `[data-gallery-section][data-section-id="${CSS.escape(dragIntent.beforeId)}"]`,
+        );
+  if (marker) {
+    marker.dataset.sectionDrop =
+      dragIntent.beforeId === null ? "after" : "before";
+  }
+}
+
+function sectionDropPosition(
   element: HTMLElement,
   event: DragEvent,
-): "before" | "after" {
+): DropPosition {
   const bounds = element.getBoundingClientRect();
   return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
 }
 
-function dropItem(
+function itemDropPosition(
+  element: HTMLElement,
+  event: DragEvent,
+): DropPosition {
+  const bounds = element.getBoundingClientRect();
+  const verticalProgress = (event.clientY - bounds.top) / bounds.height;
+  if (verticalProgress <= 0.25) {
+    return "before";
+  }
+  if (verticalProgress >= 0.75) {
+    return "after";
+  }
+
+  const grid = element.closest<HTMLElement>("[data-section-grid]");
+  const columns = grid
+    ? window
+        .getComputedStyle(grid)
+        .gridTemplateColumns.trim()
+        .split(/\s+/u).length
+    : 1;
+  if (columns > 1) {
+    return event.clientX < bounds.left + bounds.width / 2
+      ? "before"
+      : "after";
+  }
+  return verticalProgress < 0.5 ? "before" : "after";
+}
+
+function beforeIdForDrop(
+  entries: readonly { readonly id: string }[],
+  targetId: string,
+  position: DropPosition,
+): string | null | undefined {
+  const targetIndex = entries.findIndex((entry) => entry.id === targetId);
+  if (targetIndex < 0) {
+    return undefined;
+  }
+  return position === "before"
+    ? targetId
+    : (entries[targetIndex + 1]?.id ?? null);
+}
+
+function itemContentAtPlacement(
   sourceId: string,
   targetSectionId: string,
-  targetId: string | undefined,
-  position: "before" | "after",
-  snapshot: GalleryContent,
-): void {
+  beforeId: string | null,
+): GalleryContent | null {
   const source = manifest.items.find((item) => item.id === sourceId);
-  if (!source || targetId === sourceId) {
-    return;
+  if (!source) {
+    return null;
   }
 
   const groups = new Map(
     manifest.sections.map((section) => [
       section.id,
-      manifest.items.filter(
-        (item) => item.sectionId === section.id && item.id !== sourceId,
+      cloneItems(
+        manifest.items.filter(
+          (item) => item.sectionId === section.id && item.id !== sourceId,
+        ),
       ),
     ]),
   );
   const targetItems = groups.get(targetSectionId);
   if (!targetItems) {
-    return;
+    return null;
   }
-  const targetIndex = targetId
-    ? targetItems.findIndex((item) => item.id === targetId)
-    : -1;
   const insertionIndex =
-    targetIndex < 0
+    beforeId === null
       ? targetItems.length
-      : targetIndex + (position === "after" ? 1 : 0);
+      : targetItems.findIndex((item) => item.id === beforeId);
+  if (insertionIndex < 0) {
+    return null;
+  }
   targetItems.splice(insertionIndex, 0, {
-    ...source,
+    ...structuredClone(source),
     sectionId: targetSectionId,
   });
-  const items = manifest.sections.flatMap(
-    (section) => groups.get(section.id) ?? [],
-  );
-  const next = { sections: structuredClone(manifest.sections), items };
-  if (contentFingerprint(next) === contentFingerprint(cloneContent())) {
-    return;
-  }
-
-  pushUndo(snapshot);
-  manifest = { ...manifest, items };
-  selection = { kind: "item", id: sourceId };
-  render(true);
-  const section = manifest.sections.find(
-    (candidate) => candidate.id === targetSectionId,
-  );
-  showToast(
-    `${source.title}を${section?.title ?? "セクション"}の${String(
-      insertionIndex + 1,
-    )}番目へ移動しました。`,
-  );
-  scheduleSave();
+  return {
+    sections: structuredClone(manifest.sections),
+    items: manifest.sections.flatMap(
+      (section) => groups.get(section.id) ?? [],
+    ),
+  };
 }
 
-function dropSection(
+function sectionContentAtPlacement(
   sourceId: string,
-  targetId: string,
-  position: "before" | "after",
-  snapshot: GalleryContent,
-): void {
-  if (sourceId === targetId) {
-    return;
-  }
+  beforeId: string | null,
+): GalleryContent | null {
   const sections = structuredClone(manifest.sections);
   const sourceIndex = sections.findIndex((section) => section.id === sourceId);
   const [moved] = sourceIndex >= 0 ? sections.splice(sourceIndex, 1) : [];
-  const targetIndex = sections.findIndex((section) => section.id === targetId);
-  if (!moved || targetIndex < 0) {
+  if (!moved) {
+    return null;
+  }
+  const insertionIndex =
+    beforeId === null
+      ? sections.length
+      : sections.findIndex((section) => section.id === beforeId);
+  if (insertionIndex < 0) {
+    return null;
+  }
+  sections.splice(insertionIndex, 0, moved);
+  return {
+    sections,
+    items: cloneItems(itemsInVisualOrder(sections)),
+  };
+}
+
+function previewItemPlacement(
+  sourceId: string,
+  targetSectionId: string,
+  beforeId: string | null,
+): boolean {
+  if (
+    dragIntent?.kind === "item" &&
+    dragIntent.targetSectionId === targetSectionId &&
+    dragIntent.beforeId === beforeId
+  ) {
+    paintDragFeedback();
+    return true;
+  }
+
+  const next = itemContentAtPlacement(
+    sourceId,
+    targetSectionId,
+    beforeId,
+  );
+  if (!next) {
+    return false;
+  }
+
+  if (
+    contentFingerprint(next) !== contentFingerprint(cloneContent())
+  ) {
+    manifest = {
+      ...manifest,
+      sections: next.sections,
+      items: next.items,
+    };
+    render(true);
+  }
+
+  const section = manifest.sections.find(
+    (candidate) => candidate.id === targetSectionId,
+  );
+  const position =
+    manifest.items
+      .filter((item) => item.sectionId === targetSectionId)
+      .findIndex((item) => item.id === sourceId) + 1;
+  dragIntent = {
+    kind: "item",
+    targetSectionId,
+    beforeId,
+    label: `移動先 · ${section?.title ?? "セクション"} / ${String(position).padStart(2, "0")}`,
+  };
+  paintDragFeedback();
+  return true;
+}
+
+function previewSectionPlacement(
+  sourceId: string,
+  beforeId: string | null,
+): boolean {
+  if (
+    dragIntent?.kind === "section" &&
+    dragIntent.beforeId === beforeId
+  ) {
+    paintDragFeedback();
+    return true;
+  }
+
+  const next = sectionContentAtPlacement(sourceId, beforeId);
+  if (!next) {
+    return false;
+  }
+
+  if (
+    contentFingerprint(next) !== contentFingerprint(cloneContent())
+  ) {
+    manifest = {
+      ...manifest,
+      sections: next.sections,
+      items: next.items,
+    };
+    render(true);
+  }
+
+  const position =
+    manifest.sections.findIndex((section) => section.id === sourceId) + 1;
+  const section = manifest.sections[position - 1];
+  dragIntent = {
+    kind: "section",
+    beforeId,
+    label: `移動先 · Section ${String(position).padStart(2, "0")} / ${section?.title ?? ""}`,
+  };
+  paintDragFeedback();
+  return true;
+}
+
+function resumeSaveAfterDrag(): void {
+  if (
+    contentFingerprint(cloneContent()) !==
+    contentFingerprint(cloneContent(confirmedManifest))
+  ) {
+    scheduleSave();
+  } else if (!saveQueue) {
+    saveAgain = false;
+    setStatus("下書きは同期済み");
+  }
+}
+
+function commitDrag(): void {
+  const currentDrag = dragState;
+  if (!currentDrag || dragIntent?.kind !== currentDrag.kind) {
+    cancelDrag();
     return;
   }
-  sections.splice(
-    targetIndex + (position === "after" ? 1 : 0),
-    0,
-    moved,
-  );
-  pushUndo(snapshot);
+
+  const changed =
+    contentFingerprint(currentDrag.snapshot) !==
+    contentFingerprint(cloneContent());
+  dragState = null;
+  dragIntent = null;
+  clearDropIndicators();
+
+  if (changed) {
+    pushUndo(currentDrag.snapshot);
+  }
+  selection = { kind: currentDrag.kind, id: currentDrag.id };
+  render();
+
+  if (changed && currentDrag.kind === "item") {
+    const item = manifest.items.find(
+      (candidate) => candidate.id === currentDrag.id,
+    );
+    const section = manifest.sections.find(
+      (candidate) => candidate.id === item?.sectionId,
+    );
+    const position =
+      manifest.items
+        .filter((candidate) => candidate.sectionId === item?.sectionId)
+        .findIndex((candidate) => candidate.id === currentDrag.id) + 1;
+    showToast(
+      `${item?.title ?? "写真"}を${section?.title ?? "セクション"}の${String(position)}番目へ移動しました。`,
+    );
+  } else if (changed) {
+    const section = manifest.sections.find(
+      (candidate) => candidate.id === currentDrag.id,
+    );
+    const position =
+      manifest.sections.findIndex(
+        (candidate) => candidate.id === currentDrag.id,
+      ) + 1;
+    showToast(
+      `${section?.title ?? "セクション"}をSection ${String(position)}へ移動しました。`,
+    );
+  }
+
+  resumeSaveAfterDrag();
+}
+
+function cancelDrag(): void {
+  const currentDrag = dragState;
+  if (!currentDrag) {
+    return;
+  }
+  const changed =
+    contentFingerprint(currentDrag.snapshot) !==
+    contentFingerprint(cloneContent());
+  dragState = null;
+  dragIntent = null;
+  clearDropIndicators();
   manifest = {
     ...manifest,
-    sections,
-    items: itemsInVisualOrder(sections),
+    sections: structuredClone(currentDrag.snapshot.sections),
+    items: structuredClone(currentDrag.snapshot.items),
   };
-  selection = { kind: "section", id: sourceId };
-  render(true);
-  showToast(`${moved.title}の表示順を変更しました。`);
-  scheduleSave();
+  render(changed);
+  resumeSaveAfterDrag();
 }
 
 canvas.addEventListener("click", (event) => {
@@ -1760,6 +2045,16 @@ canvas.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("dragstart", (event) => {
+  if (saveInProgress || importInProgress) {
+    event.preventDefault();
+    showToast(
+      importInProgress
+        ? "写真の取り込み完了後に移動できます。"
+        : "下書きの保存完了後に移動できます。",
+    );
+    return;
+  }
+
   const target = event.target;
   const figure =
     target instanceof Element
@@ -1767,9 +2062,14 @@ canvas.addEventListener("dragstart", (event) => {
       : null;
   if (figure?.dataset.galleryId && !previewOnly) {
     const id = figure.dataset.galleryId;
-    selection = { kind: "item", id };
+    if (saveTimer !== null) {
+      window.clearTimeout(saveTimer);
+      saveTimer = null;
+      saveAgain = true;
+    }
     dragState = { kind: "item", id, snapshot: cloneContent() };
-    figure.dataset.dragging = "true";
+    dragIntent = null;
+    paintDragFeedback();
     event.dataTransfer?.setData("text/plain", `item:${id}`);
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
@@ -1789,9 +2089,14 @@ canvas.addEventListener("dragstart", (event) => {
     return;
   }
   const id = section.dataset.sectionId;
-  selection = { kind: "section", id };
+  if (saveTimer !== null) {
+    window.clearTimeout(saveTimer);
+    saveTimer = null;
+    saveAgain = true;
+  }
   dragState = { kind: "section", id, snapshot: cloneContent() };
-  section.dataset.dragging = "true";
+  dragIntent = null;
+  paintDragFeedback();
   event.dataTransfer?.setData("text/plain", `section:${id}`);
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "move";
@@ -1803,18 +2108,6 @@ canvas.addEventListener("dragover", (event) => {
     return;
   }
   const target = event.target;
-  clearDropIndicators();
-  const sourceElement =
-    dragState.kind === "item"
-      ? canvas.querySelector<HTMLElement>(
-          `[data-gallery-id="${CSS.escape(dragState.id)}"]`,
-        )
-      : canvas.querySelector<HTMLElement>(
-          `[data-gallery-section][data-section-id="${CSS.escape(dragState.id)}"]`,
-        );
-  if (sourceElement) {
-    sourceElement.dataset.dragging = "true";
-  }
 
   if (dragState.kind === "item") {
     const grid =
@@ -1822,33 +2115,83 @@ canvas.addEventListener("dragover", (event) => {
         ? target.closest<HTMLElement>("[data-section-grid]")
         : null;
     if (!grid?.dataset.sectionId) {
+      dragIntent = null;
+      paintDragFeedback();
       return;
     }
-    event.preventDefault();
-    grid.dataset.dropActive = "true";
     const figure =
       target instanceof Element
         ? target.closest<HTMLElement>("[data-gallery-id]")
         : null;
-    if (figure?.dataset.galleryId !== dragState.id && figure) {
-      figure.dataset.itemDrop = pointerDropPosition(figure, event);
+    if (figure?.dataset.galleryId === dragState.id) {
+      if (dragIntent?.kind === "item") {
+        event.preventDefault();
+        paintDragFeedback();
+      }
+    } else {
+      const targetItems = manifest.items.filter(
+        (item) =>
+          item.sectionId === grid.dataset.sectionId &&
+          item.id !== dragState?.id,
+      );
+      const beforeId = figure?.dataset.galleryId
+        ? beforeIdForDrop(
+            targetItems,
+            figure.dataset.galleryId,
+            itemDropPosition(figure, event),
+          )
+        : null;
+      if (
+        beforeId !== undefined &&
+        previewItemPlacement(
+          dragState.id,
+          grid.dataset.sectionId,
+          beforeId,
+        )
+      ) {
+        event.preventDefault();
+      } else {
+        dragIntent = null;
+        paintDragFeedback();
+      }
     }
   } else {
     const section =
       target instanceof Element
         ? target.closest<HTMLElement>("[data-gallery-section]")
         : null;
-    if (!section?.dataset.sectionId || section.dataset.sectionId === dragState.id) {
+    if (!section?.dataset.sectionId) {
+      dragIntent = null;
+      paintDragFeedback();
       return;
     }
-    event.preventDefault();
-    const header = section.querySelector<HTMLElement>("header");
-    section.dataset.sectionDrop = pointerDropPosition(
-      header ?? section,
-      event,
-    );
+    if (section.dataset.sectionId === dragState.id) {
+      if (dragIntent?.kind === "section") {
+        event.preventDefault();
+        paintDragFeedback();
+      }
+    } else {
+      const targetSections = manifest.sections.filter(
+        (candidate) => candidate.id !== dragState?.id,
+      );
+      const header = section.querySelector<HTMLElement>("header");
+      const beforeId = beforeIdForDrop(
+        targetSections,
+        section.dataset.sectionId,
+        sectionDropPosition(header ?? section, event),
+      );
+      if (
+        beforeId !== undefined &&
+        previewSectionPlacement(dragState.id, beforeId)
+      ) {
+        event.preventDefault();
+      } else {
+        dragIntent = null;
+        paintDragFeedback();
+      }
+    }
   }
-  if (event.dataTransfer) {
+  if (event.defaultPrevented && event.dataTransfer) {
     event.dataTransfer.dropEffect = "move";
   }
 });
@@ -1857,60 +2200,32 @@ canvas.addEventListener("drop", (event) => {
   if (!dragState) {
     return;
   }
-  event.preventDefault();
-  const target = event.target;
-  const currentDrag = dragState;
-  dragState = null;
-  if (currentDrag.kind === "item") {
-    const grid =
-      target instanceof Element
-        ? target.closest<HTMLElement>("[data-section-grid]")
-        : null;
-    const figure =
-      target instanceof Element
-        ? target.closest<HTMLElement>("[data-gallery-id]")
-        : null;
-    const targetSectionId = grid?.dataset.sectionId;
-    if (targetSectionId) {
-      dropItem(
-        currentDrag.id,
-        targetSectionId,
-        figure?.dataset.galleryId,
-        figure?.dataset.itemDrop === "after" ? "after" : "before",
-        currentDrag.snapshot,
-      );
-    }
-  } else {
-    const section =
-      target instanceof Element
-        ? target.closest<HTMLElement>("[data-gallery-section]")
-        : null;
-    const targetId = section?.dataset.sectionId;
-    if (targetId) {
-      dropSection(
-        currentDrag.id,
-        targetId,
-        section.dataset.sectionDrop === "after" ? "after" : "before",
-        currentDrag.snapshot,
-      );
-    }
-  }
-  clearDropIndicators();
-});
-
-canvas.addEventListener("dragleave", (event) => {
-  if (
-    event.relatedTarget instanceof Node &&
-    canvas.contains(event.relatedTarget)
-  ) {
+  if (dragIntent?.kind === dragState.kind) {
+    event.preventDefault();
+    commitDrag();
     return;
   }
-  clearDropIndicators();
+  cancelDrag();
 });
 
 canvas.addEventListener("dragend", () => {
-  clearDropIndicators();
-  dragState = null;
+  cancelDrag();
+});
+
+document.addEventListener("dragover", (event) => {
+  if (
+    dragState &&
+    (!(event.target instanceof Node) || !canvas.contains(event.target))
+  ) {
+    clearDropIndicators();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && dragState) {
+    event.preventDefault();
+    cancelDrag();
+  }
 });
 
 inspector.addEventListener("focusin", (event) => {
