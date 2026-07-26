@@ -340,8 +340,8 @@ export const primaryButton = style({
   display: "none",
   placeItems: "center",
   paddingInline: vars.space[4],
-  borderColor: vars.color.cobaltDark,
-  background: vars.color.cobaltDark,
+  borderColor: vars.color.cobalt,
+  background: vars.color.cobalt,
   color: vars.color.accentInk,
   fontWeight: vars.weight.semibold,
   selectors: {
@@ -359,8 +359,8 @@ export const primaryButton = style({
     "(hover: hover)": {
       selectors: {
         "&:hover": {
-          borderColor: vars.color.graphite,
-          background: vars.color.graphite,
+          borderColor: vars.color.cobaltDark,
+          background: vars.color.cobaltDark,
         },
       },
     },
@@ -689,15 +689,12 @@ export const profileFigure = style({
 });
 
 globalStyle(`${profileFigure} picture`, {
-  position: "relative",
   aspectRatio: "1",
   overflow: "hidden",
   background: vars.color.paperQuiet,
 });
 
 globalStyle(`${profileFigure} img`, {
-  position: "absolute",
-  inset: 0,
   width: "100%",
   height: "100%",
   objectFit: "contain",

@@ -394,10 +394,10 @@ test("home hero pairs the identity copy with the full profile icon", async ({
     expect(result.picture.naturalWidth).toBe(result.picture.naturalHeight);
     expect(result.picture.transform).toBe("none");
     expect(result.picture.clipPath).toBe("none");
-    expect(Math.abs(result.picture.imageTop - result.picture.top)).toBeLessThanOrEqual(2);
-    expect(Math.abs(result.picture.imageRight - result.picture.right)).toBeLessThanOrEqual(2);
-    expect(Math.abs(result.picture.imageBottom - result.picture.bottom)).toBeLessThanOrEqual(2);
-    expect(Math.abs(result.picture.imageLeft - result.picture.left)).toBeLessThanOrEqual(2);
+    expect(Math.abs(result.picture.imageTop - result.picture.top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageRight - result.picture.right)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageBottom - result.picture.bottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(result.picture.imageLeft - result.picture.left)).toBeLessThanOrEqual(1);
 
     for (const [name, bounds] of [
       ["copy", result.copy],
