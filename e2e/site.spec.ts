@@ -43,10 +43,15 @@ interface DragSession {
   readonly dataTransfer: JSHandle<DataTransfer>;
 }
 
+interface DragPoint {
+  readonly clientX: number;
+  readonly clientY: number;
+}
+
 async function dragEventPoint(
   target: Locator,
   position: DropPosition,
-): Promise<{ readonly clientX: number; readonly clientY: number }> {
+): Promise<DragPoint> {
   const bounds = await target.boundingBox();
   if (!bounds) {
     throw new Error("Drag target has no visible bounds.");
@@ -84,9 +89,21 @@ async function dragOver(
   target: Locator,
   position: DropPosition = "before",
 ): Promise<void> {
+  await dragOverAt(
+    session,
+    target,
+    await dragEventPoint(target, position),
+  );
+}
+
+async function dragOverAt(
+  session: DragSession,
+  target: Locator,
+  point: DragPoint,
+): Promise<void> {
   await target.dispatchEvent("dragover", {
     dataTransfer: session.dataTransfer,
-    ...(await dragEventPoint(target, position)),
+    ...point,
   });
 }
 
@@ -941,11 +958,15 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
     `[data-gallery-section][data-section-id="${addedSectionId}"]`,
   );
   const sectionWritesBeforePreview = draftWrites;
+  const sectionBoundaryPoint = await dragEventPoint(
+    initialSection,
+    "before",
+  );
   let sectionDrag = await beginDrag(
     page,
     addedSection.locator("[data-section-drag]"),
   );
-  await dragOver(sectionDrag, initialSection);
+  await dragOverAt(sectionDrag, initialSection, sectionBoundaryPoint);
   await expect(page.locator("[data-gallery-admin]")).toHaveAttribute(
     "data-drag-label",
     /Night Sessions/u,
@@ -953,6 +974,12 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
   await expect(addedSection).toHaveAttribute("data-dragging", "true");
   await expect(sections.first().locator("[data-section-title]")).toHaveText(
     "Night Sessions",
+  );
+  await page.waitForTimeout(32);
+  await dragOverAt(sectionDrag, initialSection, sectionBoundaryPoint);
+  await expect(sections.first()).toHaveAttribute(
+    "data-section-id",
+    addedSectionId,
   );
   await page.waitForTimeout(800);
   expect(draftWrites).toBe(sectionWritesBeforePreview);
@@ -1071,6 +1098,189 @@ test("Gallery Workbench adds, edits, and reorders sections and photos", async ({
     )
     .toBe(initialSectionId);
   await assertNoAxeViolations(page);
+});
+
+test("Gallery Workbench keeps photo drop boundaries stable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/admin/gallery/");
+
+  const grid = page.locator("[data-section-grid]").first();
+  const items = grid.locator("[data-gallery-id]");
+  const initialIds = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  const sourceId = initialIds[3];
+  const targetId = initialIds[5];
+  if (!sourceId || !targetId) {
+    throw new Error("Gallery boundary items have no stable ids.");
+  }
+  const source = page.locator(
+    `[data-gallery-id="${sourceId}"] [data-gallery-select]`,
+  );
+  const target = page.locator(`[data-gallery-id="${targetId}"]`);
+  await target.scrollIntoViewIfNeeded();
+  const targetBounds = await target.boundingBox();
+  if (!targetBounds) {
+    throw new Error("Gallery boundary target has no visible bounds.");
+  }
+  const fixedPoint = {
+    clientX: targetBounds.x + targetBounds.width / 2 - 1,
+    clientY: targetBounds.y + targetBounds.height / 2,
+  };
+
+  const session = await beginDrag(page, source);
+  await dragOverAt(session, target, fixedPoint);
+  const firstPreviewOrder = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  expect(firstPreviewOrder).not.toEqual(initialIds);
+
+  await page.waitForTimeout(32);
+  await dragOverAt(session, target, fixedPoint);
+  const repeatedPreviewOrder = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  expect(
+    repeatedPreviewOrder,
+    "The same pointer coordinate must keep the same preview placement.",
+  ).toEqual(firstPreviewOrder);
+
+  await page.waitForTimeout(180);
+  const movedTargetBounds = await target.boundingBox();
+  if (!movedTargetBounds) {
+    throw new Error("Gallery boundary target moved out of view.");
+  }
+  await dragOverAt(session, target, {
+    clientX: movedTargetBounds.x + movedTargetBounds.width - 1,
+    clientY: movedTargetBounds.y + movedTargetBounds.height / 2,
+  });
+  const intentionalPreviewOrder = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  expect(
+    intentionalPreviewOrder,
+    "Moving beyond the boundary dead zone must select the next placement.",
+  ).not.toEqual(firstPreviewOrder);
+
+  await endDrag(session);
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+      ),
+    )
+    .toEqual(initialIds);
+
+  const gapSourceId = initialIds.at(-1);
+  if (!gapSourceId) {
+    throw new Error("Gallery gap source has no stable id.");
+  }
+  const gapSource = page.locator(
+    `[data-gallery-id="${gapSourceId}"] [data-gallery-select]`,
+  );
+  const gapSession = await beginDrag(page, gapSource);
+  const gap = await items.evaluateAll((elements, excludedId) => {
+    const cards = elements
+      .filter(
+        (element) =>
+          element.getAttribute("data-gallery-id") !== excludedId,
+      )
+      .map((element) => ({
+        id: element.getAttribute("data-gallery-id") ?? "",
+        bounds: element.getBoundingClientRect(),
+      }));
+    let closest:
+      | {
+          readonly leftId: string;
+          readonly rightId: string;
+          readonly distance: number;
+          readonly point: DragPoint;
+        }
+      | undefined;
+
+    for (let leftIndex = 0; leftIndex < cards.length; leftIndex += 1) {
+      for (
+        let rightIndex = leftIndex + 1;
+        rightIndex < cards.length;
+        rightIndex += 1
+      ) {
+        const first = cards[leftIndex];
+        const second = cards[rightIndex];
+        if (!first || !second) {
+          continue;
+        }
+        const [left, right] =
+          first.bounds.left < second.bounds.left
+            ? [first, second]
+            : [second, first];
+        const overlapTop = Math.max(
+          left.bounds.top,
+          right.bounds.top,
+        );
+        const overlapBottom = Math.min(
+          left.bounds.bottom,
+          right.bounds.bottom,
+        );
+        const horizontalGap = right.bounds.left - left.bounds.right;
+        if (
+          horizontalGap <= 1 ||
+          overlapBottom - overlapTop <=
+            Math.min(left.bounds.height, right.bounds.height) / 2 ||
+          (closest && closest.distance <= horizontalGap)
+        ) {
+          continue;
+        }
+        closest = {
+          leftId: left.id,
+          rightId: right.id,
+          distance: horizontalGap,
+          point: {
+            clientX: left.bounds.right + horizontalGap / 2,
+            clientY: overlapTop + (overlapBottom - overlapTop) / 2,
+          },
+        };
+      }
+    }
+    return closest ?? null;
+  }, gapSourceId);
+  if (!gap) {
+    throw new Error("Gallery has no horizontal card gap to test.");
+  }
+
+  await dragOverAt(gapSession, grid, gap.point);
+  const gapPreviewOrder = await items.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-gallery-id") ?? ""),
+  );
+  const gapSourceIndex = gapPreviewOrder.indexOf(gapSourceId);
+  expect(gapPreviewOrder[gapSourceIndex - 1]).toBe(gap.leftId);
+  expect(gapPreviewOrder[gapSourceIndex + 1]).toBe(gap.rightId);
+  await expect(
+    grid.locator("[data-item-drop='inline-before']"),
+  ).toHaveCount(1);
+
+  await page.waitForTimeout(32);
+  await dragOverAt(gapSession, grid, gap.point);
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map(
+          (element) => element.getAttribute("data-gallery-id") ?? "",
+        ),
+      ),
+    )
+    .toEqual(gapPreviewOrder);
+  await endDrag(gapSession);
+  await expect
+    .poll(() =>
+      items.evaluateAll((elements) =>
+        elements.map(
+          (element) => element.getAttribute("data-gallery-id") ?? "",
+        ),
+      ),
+    )
+    .toEqual(initialIds);
 });
 
 test("Gallery Workbench toolbar remains reachable at 320px", async ({

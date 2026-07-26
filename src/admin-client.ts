@@ -98,6 +98,17 @@ type EditorSelection =
   | { readonly kind: "section"; readonly id: string };
 
 type DropPosition = "before" | "after";
+type ItemDropAxis = "block" | "inline";
+
+interface DragPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+interface ItemPlacement {
+  readonly beforeId: string | null;
+  readonly markerAxis: ItemDropAxis;
+}
 
 type DragState =
   | {
@@ -116,6 +127,7 @@ type DragIntent =
       readonly kind: "item";
       readonly targetSectionId: string;
       readonly beforeId: string | null;
+      readonly markerAxis: ItemDropAxis;
       readonly label: string;
     }
   | {
@@ -138,6 +150,7 @@ let toastTimer: number | null = null;
 let inspectorEditStart: GalleryContent | null = null;
 let dragState: DragState | null = null;
 let dragIntent: DragIntent | null = null;
+let acceptedDragPoint: DragPoint | null = null;
 
 function contentFingerprint(content: GalleryContent): string {
   return JSON.stringify({
@@ -639,12 +652,23 @@ function layoutElements(): HTMLElement[] {
   );
 }
 
+function settleReorderAnimations(): void {
+  layoutElements().forEach((element) => {
+    element.getAnimations().forEach((animation) => {
+      animation.cancel();
+    });
+  });
+}
+
 function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
   if (reducedMotion.matches) {
     return;
   }
 
   const duration = dragState ? 160 : 280;
+  const draggedKey = dragState
+    ? `${dragState.kind}:${dragState.id}`
+    : null;
   const records = layoutElements().map((element) => {
     element.getAnimations().forEach((animation) => {
       animation.cancel();
@@ -673,6 +697,9 @@ function animateReorder(before: ReadonlyMap<string, DOMRect>): void {
   );
 
   records.forEach(({ element, key, previous, current }) => {
+    if (key === draggedKey) {
+      return;
+    }
     if (key?.startsWith("item:")) {
       const sectionId = element.closest<HTMLElement>(
         "[data-gallery-section]",
@@ -1644,17 +1671,28 @@ function paintDragFeedback(): void {
       return;
     }
     grid.dataset.dropActive = "true";
-    const marker =
-      dragIntent.beforeId === null
-        ? Array.from(
-            grid.querySelectorAll<HTMLElement>("[data-gallery-id]"),
-          ).at(-1)
-        : grid.querySelector<HTMLElement>(
-            `[data-gallery-id="${CSS.escape(dragIntent.beforeId)}"]`,
-          );
+    const items = Array.from(
+      grid.querySelectorAll<HTMLElement>("[data-gallery-id]"),
+    );
+    const sourceId = dragState.id;
+    const sourceIndex = items.findIndex(
+      (item) => item.dataset.galleryId === sourceId,
+    );
+    const marker = items[sourceIndex];
     if (marker) {
-      marker.dataset.itemDrop =
-        dragIntent.beforeId === null ? "after" : "before";
+      const previous = sourceIndex > 0 ? items[sourceIndex - 1] : undefined;
+      const sharesRow =
+        previous !== undefined &&
+        Math.min(
+          previous.offsetTop + previous.offsetHeight,
+          marker.offsetTop + marker.offsetHeight,
+        ) > Math.max(previous.offsetTop, marker.offsetTop);
+      const markerAxis: ItemDropAxis =
+        sharesRow &&
+        marker.offsetWidth < grid.clientWidth * 0.8
+          ? "inline"
+          : "block";
+      marker.dataset.itemDrop = `${markerAxis}-before`;
     }
     return;
   }
@@ -1673,40 +1711,166 @@ function paintDragFeedback(): void {
   }
 }
 
-function sectionDropPosition(
-  element: HTMLElement,
-  event: DragEvent,
-): DropPosition {
-  const bounds = element.getBoundingClientRect();
-  return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+const dragIntentHysteresis = 12;
+const dropZoneStickiness = 20;
+
+function pointDistanceToRect(
+  point: DragPoint,
+  bounds: DOMRect,
+): number {
+  const x =
+    point.x < bounds.left
+      ? bounds.left - point.x
+      : point.x > bounds.right
+        ? point.x - bounds.right
+        : 0;
+  const y =
+    point.y < bounds.top
+      ? bounds.top - point.y
+      : point.y > bounds.bottom
+        ? point.y - bounds.bottom
+        : 0;
+  return Math.hypot(x, y);
 }
 
-function itemDropPosition(
-  element: HTMLElement,
-  event: DragEvent,
-): DropPosition {
-  const bounds = element.getBoundingClientRect();
-  const verticalProgress = (event.clientY - bounds.top) / bounds.height;
-  if (verticalProgress <= 0.25) {
-    return "before";
+function eventPoint(event: DragEvent): DragPoint {
+  return { x: event.clientX, y: event.clientY };
+}
+
+function canChangeDragIntent(event: DragEvent): boolean {
+  if (!dragIntent || !acceptedDragPoint) {
+    return true;
   }
-  if (verticalProgress >= 0.75) {
-    return "after";
+  return (
+    Math.hypot(
+      event.clientX - acceptedDragPoint.x,
+      event.clientY - acceptedDragPoint.y,
+    ) >= dragIntentHysteresis
+  );
+}
+
+function rememberAcceptedDragPoint(event: DragEvent): void {
+  acceptedDragPoint = eventPoint(event);
+}
+
+function itemTargetGrid(event: DragEvent): HTMLElement | null {
+  const grids = Array.from(
+    canvas.querySelectorAll<HTMLElement>("[data-section-grid]"),
+  );
+  if (grids.length === 0) {
+    return null;
   }
 
-  const grid = element.closest<HTMLElement>("[data-section-grid]");
-  const columns = grid
-    ? window
-        .getComputedStyle(grid)
-        .gridTemplateColumns.trim()
-        .split(/\s+/u).length
-    : 1;
-  if (columns > 1) {
-    return event.clientX < bounds.left + bounds.width / 2
-      ? "before"
-      : "after";
+  if (dragIntent?.kind === "item") {
+    const current = canvas.querySelector<HTMLElement>(
+      `[data-section-grid][data-section-id="${CSS.escape(dragIntent.targetSectionId)}"]`,
+    );
+    if (
+      current &&
+      pointDistanceToRect(eventPoint(event), current.getBoundingClientRect()) <=
+        dropZoneStickiness
+    ) {
+      return current;
+    }
   }
-  return verticalProgress < 0.5 ? "before" : "after";
+
+  const target =
+    event.target instanceof Element
+      ? event.target.closest<HTMLElement>("[data-section-grid]")
+      : null;
+  if (target) {
+    return target;
+  }
+
+  const point = eventPoint(event);
+  return grids.reduce((closest, candidate) =>
+    pointDistanceToRect(point, candidate.getBoundingClientRect()) <
+    pointDistanceToRect(point, closest.getBoundingClientRect())
+      ? candidate
+      : closest,
+  );
+}
+
+function itemPlacementAtPoint(
+  grid: HTMLElement,
+  sourceId: string,
+  event: DragEvent,
+): ItemPlacement | null {
+  const targetSectionId = grid.dataset.sectionId;
+  if (!targetSectionId) {
+    return null;
+  }
+  const entries = manifest.items.filter(
+    (item) =>
+      item.sectionId === targetSectionId && item.id !== sourceId,
+  );
+  if (entries.length === 0) {
+    return { beforeId: null, markerAxis: "block" };
+  }
+
+  const candidates = entries.flatMap((entry) => {
+    const element = grid.querySelector<HTMLElement>(
+      `[data-gallery-id="${CSS.escape(entry.id)}"]`,
+    );
+    return element
+      ? [{ entry, bounds: element.getBoundingClientRect() }]
+      : [];
+  });
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const point = eventPoint(event);
+  const closest = candidates.reduce((current, candidate) =>
+    pointDistanceToRect(point, candidate.bounds) <
+    pointDistanceToRect(point, current.bounds)
+      ? candidate
+      : current,
+  );
+  const gridBounds = grid.getBoundingClientRect();
+  const withinBlock =
+    point.y >= closest.bounds.top && point.y <= closest.bounds.bottom;
+  const markerAxis: ItemDropAxis =
+    withinBlock && closest.bounds.width < gridBounds.width * 0.8
+      ? "inline"
+      : "block";
+  const position: DropPosition =
+    markerAxis === "inline"
+      ? point.x < closest.bounds.left + closest.bounds.width / 2
+        ? "before"
+        : "after"
+      : point.y < closest.bounds.top + closest.bounds.height / 2
+        ? "before"
+        : "after";
+  const beforeId = beforeIdForDrop(
+    entries,
+    closest.entry.id,
+    position,
+  );
+  return beforeId === undefined
+    ? null
+    : { beforeId, markerAxis };
+}
+
+function sectionPlacementAtPoint(
+  sourceId: string,
+  event: DragEvent,
+): string | null {
+  const point = eventPoint(event);
+  const boundaries = manifest.sections
+    .filter((section) => section.id !== sourceId)
+    .flatMap((section) => {
+      const element = canvas.querySelector<HTMLElement>(
+        `[data-gallery-section][data-section-id="${CSS.escape(section.id)}"]`,
+      );
+      const header = element?.querySelector<HTMLElement>("header");
+      if (!header) {
+        return [];
+      }
+      const bounds = header.getBoundingClientRect();
+      return [{ id: section.id, midpoint: bounds.top + bounds.height / 2 }];
+    });
+  return boundaries.find((boundary) => point.y < boundary.midpoint)?.id ?? null;
 }
 
 function beforeIdForDrop(
@@ -1793,13 +1957,28 @@ function sectionContentAtPlacement(
 function previewItemPlacement(
   sourceId: string,
   targetSectionId: string,
-  beforeId: string | null,
+  placement: ItemPlacement,
+  event: DragEvent,
 ): boolean {
   if (
     dragIntent?.kind === "item" &&
     dragIntent.targetSectionId === targetSectionId &&
-    dragIntent.beforeId === beforeId
+    dragIntent.beforeId === placement.beforeId
   ) {
+    if (
+      dragIntent.markerAxis !== placement.markerAxis &&
+      canChangeDragIntent(event)
+    ) {
+      dragIntent = {
+        ...dragIntent,
+        markerAxis: placement.markerAxis,
+      };
+      rememberAcceptedDragPoint(event);
+    }
+    paintDragFeedback();
+    return true;
+  }
+  if (!canChangeDragIntent(event)) {
     paintDragFeedback();
     return true;
   }
@@ -1807,7 +1986,7 @@ function previewItemPlacement(
   const next = itemContentAtPlacement(
     sourceId,
     targetSectionId,
-    beforeId,
+    placement.beforeId,
   );
   if (!next) {
     return false;
@@ -1834,9 +2013,11 @@ function previewItemPlacement(
   dragIntent = {
     kind: "item",
     targetSectionId,
-    beforeId,
+    beforeId: placement.beforeId,
+    markerAxis: placement.markerAxis,
     label: `移動先 · ${section?.title ?? "セクション"} / ${String(position).padStart(2, "0")}`,
   };
+  rememberAcceptedDragPoint(event);
   paintDragFeedback();
   return true;
 }
@@ -1844,11 +2025,16 @@ function previewItemPlacement(
 function previewSectionPlacement(
   sourceId: string,
   beforeId: string | null,
+  event: DragEvent,
 ): boolean {
   if (
     dragIntent?.kind === "section" &&
     dragIntent.beforeId === beforeId
   ) {
+    paintDragFeedback();
+    return true;
+  }
+  if (!canChangeDragIntent(event)) {
     paintDragFeedback();
     return true;
   }
@@ -1877,6 +2063,7 @@ function previewSectionPlacement(
     beforeId,
     label: `移動先 · Section ${String(position).padStart(2, "0")} / ${section?.title ?? ""}`,
   };
+  rememberAcceptedDragPoint(event);
   paintDragFeedback();
   return true;
 }
@@ -1905,6 +2092,7 @@ function commitDrag(): void {
     contentFingerprint(cloneContent());
   dragState = null;
   dragIntent = null;
+  acceptedDragPoint = null;
   clearDropIndicators();
 
   if (changed) {
@@ -1953,6 +2141,7 @@ function cancelDrag(): void {
     contentFingerprint(cloneContent());
   dragState = null;
   dragIntent = null;
+  acceptedDragPoint = null;
   clearDropIndicators();
   manifest = {
     ...manifest,
@@ -2061,6 +2250,7 @@ canvas.addEventListener("dragstart", (event) => {
       ? target.closest<HTMLElement>("[data-gallery-id]")
       : null;
   if (figure?.dataset.galleryId && !previewOnly) {
+    settleReorderAnimations();
     const id = figure.dataset.galleryId;
     if (saveTimer !== null) {
       window.clearTimeout(saveTimer);
@@ -2069,6 +2259,7 @@ canvas.addEventListener("dragstart", (event) => {
     }
     dragState = { kind: "item", id, snapshot: cloneContent() };
     dragIntent = null;
+    acceptedDragPoint = null;
     paintDragFeedback();
     event.dataTransfer?.setData("text/plain", `item:${id}`);
     if (event.dataTransfer) {
@@ -2088,6 +2279,7 @@ canvas.addEventListener("dragstart", (event) => {
     event.preventDefault();
     return;
   }
+  settleReorderAnimations();
   const id = section.dataset.sectionId;
   if (saveTimer !== null) {
     window.clearTimeout(saveTimer);
@@ -2096,6 +2288,7 @@ canvas.addEventListener("dragstart", (event) => {
   }
   dragState = { kind: "section", id, snapshot: cloneContent() };
   dragIntent = null;
+  acceptedDragPoint = null;
   paintDragFeedback();
   event.dataTransfer?.setData("text/plain", `section:${id}`);
   if (event.dataTransfer) {
@@ -2107,89 +2300,38 @@ canvas.addEventListener("dragover", (event) => {
   if (previewOnly || !dragState) {
     return;
   }
-  const target = event.target;
+  const currentDrag = dragState;
 
-  if (dragState.kind === "item") {
-    const grid =
-      target instanceof Element
-        ? target.closest<HTMLElement>("[data-section-grid]")
-        : null;
-    if (!grid?.dataset.sectionId) {
-      dragIntent = null;
-      paintDragFeedback();
-      return;
-    }
-    const figure =
-      target instanceof Element
-        ? target.closest<HTMLElement>("[data-gallery-id]")
-        : null;
-    if (figure?.dataset.galleryId === dragState.id) {
-      if (dragIntent?.kind === "item") {
-        event.preventDefault();
-        paintDragFeedback();
-      }
+  if (currentDrag.kind === "item") {
+    const grid = itemTargetGrid(event);
+    const placement = grid
+      ? itemPlacementAtPoint(grid, currentDrag.id, event)
+      : null;
+    const targetSectionId = grid?.dataset.sectionId;
+    if (
+      targetSectionId &&
+      placement &&
+      previewItemPlacement(
+        currentDrag.id,
+        targetSectionId,
+        placement,
+        event,
+      )
+    ) {
+      event.preventDefault();
     } else {
-      const targetItems = manifest.items.filter(
-        (item) =>
-          item.sectionId === grid.dataset.sectionId &&
-          item.id !== dragState?.id,
-      );
-      const beforeId = figure?.dataset.galleryId
-        ? beforeIdForDrop(
-            targetItems,
-            figure.dataset.galleryId,
-            itemDropPosition(figure, event),
-          )
-        : null;
-      if (
-        beforeId !== undefined &&
-        previewItemPlacement(
-          dragState.id,
-          grid.dataset.sectionId,
-          beforeId,
-        )
-      ) {
-        event.preventDefault();
-      } else {
-        dragIntent = null;
-        paintDragFeedback();
-      }
+      paintDragFeedback();
     }
+  } else if (
+    previewSectionPlacement(
+      currentDrag.id,
+      sectionPlacementAtPoint(currentDrag.id, event),
+      event,
+    )
+  ) {
+    event.preventDefault();
   } else {
-    const section =
-      target instanceof Element
-        ? target.closest<HTMLElement>("[data-gallery-section]")
-        : null;
-    if (!section?.dataset.sectionId) {
-      dragIntent = null;
-      paintDragFeedback();
-      return;
-    }
-    if (section.dataset.sectionId === dragState.id) {
-      if (dragIntent?.kind === "section") {
-        event.preventDefault();
-        paintDragFeedback();
-      }
-    } else {
-      const targetSections = manifest.sections.filter(
-        (candidate) => candidate.id !== dragState?.id,
-      );
-      const header = section.querySelector<HTMLElement>("header");
-      const beforeId = beforeIdForDrop(
-        targetSections,
-        section.dataset.sectionId,
-        sectionDropPosition(header ?? section, event),
-      );
-      if (
-        beforeId !== undefined &&
-        previewSectionPlacement(dragState.id, beforeId)
-      ) {
-        event.preventDefault();
-      } else {
-        dragIntent = null;
-        paintDragFeedback();
-      }
-    }
+    paintDragFeedback();
   }
   if (event.defaultPrevented && event.dataTransfer) {
     event.dataTransfer.dropEffect = "move";
