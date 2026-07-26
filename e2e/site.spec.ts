@@ -1489,6 +1489,11 @@ test("Gallery Workbench previews automatic layouts before one accepted draft sav
 }) => {
   let revision = 1;
   let draftWrites = 0;
+  let savedItemIds: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
+  });
   await page.route("**/admin/gallery/api/draft", async (route) => {
     if (route.request().method() !== "PUT") {
       await route.continue();
@@ -1499,11 +1504,20 @@ test("Gallery Workbench previews automatic layouts before one accepted draft sav
       typeof request !== "object" ||
       request === null ||
       !("sections" in request) ||
-      !("items" in request)
+      !("items" in request) ||
+      !Array.isArray(request.items)
     ) {
       await route.fulfill({ status: 400, body: "Invalid test request" });
       return;
     }
+    savedItemIds = request.items.flatMap((item) =>
+      typeof item === "object" &&
+      item !== null &&
+      "id" in item &&
+      typeof item.id === "string"
+        ? [item.id]
+        : [],
+    );
     draftWrites += 1;
     revision += 1;
     await route.fulfill({
@@ -1533,9 +1547,34 @@ test("Gallery Workbench previews automatic layouts before one accepted draft sav
 
   await page.locator("[data-auto-layout-next]").click();
   await expect(preview.locator("[data-auto-layout-summary]")).toContainText("案");
+  const previewItems = page.locator("[data-section-grid]").first().locator(
+    "[data-gallery-id]",
+  );
+  const beforeDragIds = await previewItems.evaluateAll((items) =>
+    items.map((item) => item.getAttribute("data-gallery-id") ?? ""),
+  );
+  const dragSource = previewItems.nth(3).locator("[data-gallery-select]");
+  const dragTarget = previewItems.nth(5).locator("[data-gallery-select]");
+  await expect(dragSource).toHaveAttribute("draggable", "true");
+  await dragSource.dragTo(dragTarget, {
+    targetPosition: { x: 2, y: 2 },
+  });
+  await expect
+    .poll(() =>
+      previewItems.evaluateAll((items) =>
+        items.map((item) => item.getAttribute("data-gallery-id") ?? ""),
+      ),
+    )
+    .not.toEqual(beforeDragIds);
+  const adjustedIds = await previewItems.evaluateAll((items) =>
+    items.map((item) => item.getAttribute("data-gallery-id") ?? ""),
+  );
+  expect(draftWrites).toBe(0);
+
   await page.locator("[data-auto-layout-accept]").click();
   await expect(preview).toBeHidden();
   await expect.poll(() => draftWrites).toBe(1);
+  expect(savedItemIds).toEqual(adjustedIds);
   await expect(page.locator("[data-gallery-status]")).toContainText(
     "下書きは同期済み",
   );
@@ -1544,5 +1583,8 @@ test("Gallery Workbench previews automatic layouts before one accepted draft sav
   const lock = page.locator("[data-gallery-layout-lock]");
   await lock.click();
   await expect(lock).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("[data-gallery-layout-lock-mark]").first()).toBeVisible();
+  await expect(
+    page.locator("[data-gallery-layout-lock-mark]").first(),
+  ).toBeVisible();
+  expect(pageErrors).toEqual([]);
 });

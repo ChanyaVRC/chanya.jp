@@ -470,9 +470,22 @@ export const GalleryCanvas: FC<GalleryCanvasProps> = ({
                         data-gallery-height={String(item.height)}
                       >
                         {editor ? (
-                          <span class={styles.galleryOrderBadge} aria-hidden="true">
-                            {String(index + 1).padStart(2, "0")}
-                          </span>
+                          <>
+                            <span
+                              class={styles.galleryOrderBadge}
+                              aria-hidden="true"
+                            >
+                              {String(index + 1).padStart(2, "0")}
+                            </span>
+                            <span
+                              class={styles.galleryLayoutLockMark}
+                              data-gallery-layout-lock-mark
+                              aria-hidden="true"
+                              hidden={!item.layoutLocked}
+                            >
+                              固定
+                            </span>
+                          </>
                         ) : null}
                         <GalleryPicture
                           item={item}

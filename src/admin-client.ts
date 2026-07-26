@@ -333,6 +333,27 @@ function createAutoLayoutPreview(): AutoLayoutPreview | null {
   return { baseline, candidates, candidateIndex: 0, changedCount };
 }
 
+function updateCurrentAutoLayoutCandidate(): void {
+  const preview = autoLayoutPreview;
+  if (!preview) {
+    return;
+  }
+  const current = cloneContent();
+  const candidates = preview.candidates.map((candidate, index) =>
+    index === preview.candidateIndex ? current : candidate,
+  );
+  const changedCount = current.items.filter((item, index) => {
+    const original = preview.baseline.items.find(
+      (candidate) => candidate.id === item.id,
+    );
+    return original
+      ? original.layout !== item.layout ||
+          preview.baseline.items[index]?.id !== item.id
+      : false;
+  }).length;
+  autoLayoutPreview = { ...preview, candidates, changedCount };
+}
+
 function setStatus(
   message: string,
   state: "saved" | "saving" | "error" = "saved",
@@ -474,19 +495,27 @@ function updateFigure(
 
   const button = figure.querySelector("button");
   const badge = figure.querySelector(`.${styles.galleryOrderBadge}`);
-  const lock = figure.querySelector("[data-gallery-layout-lock-mark]");
+  let lock = figure.querySelector<HTMLElement>(
+    "[data-gallery-layout-lock-mark]",
+  );
   const picture = figure.querySelector("picture");
   const title = figure.querySelector("[data-gallery-caption-title]");
   const date = figure.querySelector("[data-gallery-caption-date]");
   if (
     !(button instanceof HTMLButtonElement) ||
     !(badge instanceof HTMLElement) ||
-    !(lock instanceof HTMLElement) ||
     !(picture instanceof HTMLPictureElement) ||
     !(title instanceof HTMLElement) ||
     !(date instanceof HTMLTimeElement)
   ) {
     throw new Error(`Gallery item ${item.id} has invalid markup.`);
+  }
+  if (!(lock instanceof HTMLElement)) {
+    lock = document.createElement("span");
+    lock.className = styles.galleryLayoutLockMark;
+    lock.dataset.galleryLayoutLockMark = "";
+    lock.setAttribute("aria-hidden", "true");
+    picture.before(lock);
   }
 
   button.className = `${styles.galleryButton} ${styles.galleryEditorButton}`;
@@ -509,7 +538,7 @@ function updateFigure(
   button.dataset.galleryDate = item.date ?? "";
   button.dataset.galleryWidth = String(item.width);
   button.dataset.galleryHeight = String(item.height);
-  button.draggable = !previewOnly && !isAutoLayoutPreviewing();
+  button.draggable = !previewOnly;
   badge.textContent = String(index + 1).padStart(2, "0");
   lock.hidden = !item.layoutLocked;
   lock.textContent = "固定";
@@ -652,8 +681,8 @@ function updateSectionElement(
   edit.ariaPressed = String(
     selection?.kind === "section" && selection.id === section.id,
   );
-  drag.hidden = previewOnly || isAutoLayoutPreviewing();
-  drag.draggable = !previewOnly && !isAutoLayoutPreviewing();
+  drag.hidden = previewOnly;
+  drag.draggable = !previewOnly;
   drag.ariaLabel = `${section.title}セクションをドラッグして並べ替え`;
   grid.dataset.sectionId = section.id;
   grid.ariaLabel = previewOnly
@@ -2555,9 +2584,10 @@ function commitDrag(): void {
   acceptedDragPoint = null;
   clearDropIndicators();
 
-  if (changed) {
+  if (changed && !isAutoLayoutPreviewing()) {
     pushUndo(currentDrag.snapshot);
   }
+  updateCurrentAutoLayoutCandidate();
   selection = { kind: currentDrag.kind, id: currentDrag.id };
   render();
 
@@ -2699,14 +2729,12 @@ canvas.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("dragstart", (event) => {
-  if (saveInProgress || importInProgress || isAutoLayoutPreviewing()) {
+  if (saveInProgress || importInProgress) {
     event.preventDefault();
     showToast(
       importInProgress
         ? "写真の取り込み完了後に移動できます。"
-        : isAutoLayoutPreviewing()
-          ? "自動配置を採用または取り消してから移動できます。"
-          : "下書きの保存完了後に移動できます。",
+        : "下書きの保存完了後に移動できます。",
     );
     return;
   }
@@ -2780,7 +2808,7 @@ canvas.addEventListener("dragstart", (event) => {
 });
 
 canvas.addEventListener("dragover", (event) => {
-  if (previewOnly || isAutoLayoutPreviewing() || !dragState) {
+  if (previewOnly || !dragState) {
     return;
   }
   const currentDrag = dragState;

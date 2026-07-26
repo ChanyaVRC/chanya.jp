@@ -202,6 +202,7 @@ describe("gallery admin boundary", () => {
     expect(body).toContain('data-section-select');
     expect(body).toContain('data-section-add');
     expect(body).toContain('data-inspector-section');
+    expect(body.match(/data-gallery-layout-lock-mark/g)).toHaveLength(42);
     expect(body.match(/data-gallery-select/g)).toHaveLength(42);
     expect(body).toContain("/src/admin-client.ts");
   });
