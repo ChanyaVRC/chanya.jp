@@ -33,6 +33,7 @@ export interface PageMetadata {
   readonly title: string;
   readonly description: string;
   readonly path: string;
+  readonly robots?: "noindex, nofollow";
 }
 
 export interface CommandItem {

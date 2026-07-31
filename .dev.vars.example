@@ -1,0 +1,6 @@
+# Local development only. Production uses the matching Wrangler vars.
+CF_ACCESS_TEAM_DOMAIN=https://replace-me.cloudflareaccess.com
+CF_ACCESS_AUD=replace-me
+# GitHub primary email returned by Access. Keep the GitHub OAuth secret in
+# Cloudflare Zero Trust only; never place it in this file or wrangler.jsonc.
+GALLERY_ADMIN_EMAIL=replace-me@example.com

@@ -1,6 +1,7 @@
 import type { FC, PropsWithChildren } from "hono/jsx";
 import { Script, ViteClient } from "vite-ssr-components/hono";
 import { CommandPalette, Footer, Header } from "./components/SiteChrome";
+import { ViteImportedStyles } from "./components/ViteImportedStyles";
 import { site } from "./data/site";
 import type { PageMetadata } from "./types";
 import * as styles from "./styles/site.css";
@@ -8,12 +9,14 @@ import * as styles from "./styles/site.css";
 interface DocumentProps extends PropsWithChildren {
   readonly metadata: PageMetadata;
   readonly currentPath: string;
+  readonly clientEntry?: "admin";
 }
 
 export const Document: FC<DocumentProps> = ({
   children,
   metadata,
   currentPath,
+  clientEntry,
 }) => {
   const canonical = new URL(metadata.path, site.origin).toString();
 
@@ -27,6 +30,7 @@ export const Document: FC<DocumentProps> = ({
         />
         <title>{metadata.title}</title>
         <meta name="description" content={metadata.description} />
+        {metadata.robots ? <meta name="robots" content={metadata.robots} /> : null}
         <meta name="theme-color" content="#f7f9fc" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content={site.name} />
@@ -37,7 +41,17 @@ export const Document: FC<DocumentProps> = ({
         <link rel="canonical" href={canonical} />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <ViteClient />
+        <ViteImportedStyles
+          entries={
+            clientEntry === "admin"
+              ? ["/src/client.ts", "/src/admin-client.ts"]
+              : ["/src/client.ts"]
+          }
+        />
         <Script src="/src/client.ts" />
+        {clientEntry === "admin" ? (
+          <Script src="/src/admin-client.ts" />
+        ) : null}
       </head>
       <body>
         <a class={styles.skipLink} href="#main-content">
